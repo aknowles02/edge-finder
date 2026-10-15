@@ -103,7 +103,7 @@ export default function Landing() {
             features={['Current week\'s board', 'All filters and sorting', 'Live W/L, units and ROI']}
           />
           <Plan
-            highlight name="Premium" price="$9.99" period="/mo" cta="Go Premium" to={user ? '/account' : '/login?next=/account'}
+            highlight name="Premium" price="$19.99" period="/mo" cta="Go Premium" to={user ? '/account' : '/login?next=/account'}
             features={['Every historical week', 'Full season track record by week', 'Email alert the moment a new board drops', 'Cancel anytime']}
           />
         </div>

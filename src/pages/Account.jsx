@@ -64,7 +64,7 @@ export default function Account() {
             <div className="text-xs font-medium uppercase tracking-wide text-muted">Plan</div>
             <div className="mt-1 text-xl font-bold text-white">
               {premium ? <span className="text-win-text">Premium</span> : 'Free'}
-              {premium && <span className="ml-2 text-sm font-medium text-muted">$9.99/mo</span>}
+              {premium && <span className="ml-2 text-sm font-medium text-muted">$19.99/mo</span>}
             </div>
             <p className="mt-1 text-sm text-muted">
               {premium
@@ -80,7 +80,7 @@ export default function Account() {
           ) : null}
           {!premium && (
             <button type="button" className="btn-primary" disabled={!!busy} onClick={() => go('/api/billing/checkout')}>
-              {busy === '/api/billing/checkout' ? <Spinner className="h-4 w-4" /> : 'Upgrade — $9.99/mo'}
+              {busy === '/api/billing/checkout' ? <Spinner className="h-4 w-4" /> : 'Upgrade — $19.99/mo'}
             </button>
           )}
         </div>

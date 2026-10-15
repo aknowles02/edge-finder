@@ -372,7 +372,7 @@ function UpgradeCard() {
       <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-win/20 text-win-text"><LockIcon className="h-5 w-5" /></div>
       <h2 className="mt-4 text-xl font-bold text-white">Past weeks are Premium</h2>
       <p className="mt-2 text-sm text-muted">
-        Unlock every historical board, the full week-by-week track record, and an email the moment a new board drops — $9.99/mo.
+        Unlock every historical board, the full week-by-week track record, and an email the moment a new board drops — $19.99/mo.
       </p>
       <div className="mt-6 flex flex-col justify-center gap-2 sm:flex-row">
         <Link to="/account" className="btn-primary">Upgrade to Premium</Link>

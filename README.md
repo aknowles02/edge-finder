@@ -33,7 +33,7 @@ All of this lives in `shared/edge.js`, which both the API and the browser import
 ## Plans
 
 - **Free** — current (latest published) week only.
-- **Premium $9.99/mo** — every historical week + email alerts. Enforced server-side (`402` on locked weeks), not just hidden in the UI.
+- **Premium $19.99/mo** — every historical week + email alerts. Enforced server-side (`402` on locked weeks), not just hidden in the UI.
 
 ## Local development
 
@@ -51,7 +51,7 @@ Without `RESEND_API_KEY`, magic links are printed in the API console. For Stripe
 ## Deploy to Vercel
 
 1. Create a Postgres database (Neon via Vercel Marketplace works well — use the **pooled** connection string).
-2. In Stripe: create a product with a $9.99/month recurring price; enable the Customer Portal; add a webhook to `https://YOUR_DOMAIN/api/billing/webhook` for `checkout.session.completed` and `customer.subscription.created|updated|deleted`.
+2. In Stripe: create a product with a $19.99/month recurring price; enable the Customer Portal; add a webhook to `https://YOUR_DOMAIN/api/billing/webhook` for `checkout.session.completed` and `customer.subscription.created|updated|deleted`.
 3. In Resend: verify your sending domain.
 4. Import the repo into Vercel and set every variable from `.env.example` (`APP_URL` = your production URL).
 5. Run `npm run migrate` once against the production `DATABASE_URL`, then deploy.
