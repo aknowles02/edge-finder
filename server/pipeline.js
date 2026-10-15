@@ -17,6 +17,8 @@ import { refreshDraftKings } from './odds.js';
 
 const SEASON = Number(process.env.SEASON || 2026);
 const MIN_RUN_GAP_S = 90;
+// Bump when scoring changes so the next run rebuilds immediately instead of waiting for the hourly slot.
+const BUILD_KEY = 'build:props-v1';
 // Rungs worth storing: anything from −150 to −1000. The board's own window (default −200 to −500) decides what qualifies.
 const STORE_MIN = -1000, STORE_MAX = -150;
 const autoPublish = () => process.env.AUTO_PUBLISH_BOARDS !== '0';
@@ -283,8 +285,8 @@ export async function runPipeline({ force = false, build = false } = {}) {
     [ladders, games] = await Promise.all([fetchAllLadders(), loadGames()]);
     return { markets: ladders.length };
   });
-  if (ladders && games && (force || build || await due('build', 60))) {
-    await step('build', async () => { const r = await buildWeek({ ladders, games }); await mark('build', r); return r; });
+  if (ladders && games && (force || build || await due(BUILD_KEY, 60))) {
+    await step('build', async () => { const r = await buildWeek({ ladders, games }); await mark(BUILD_KEY, r); return r; });
   }
   if (ladders) await step('kalshi', () => refreshKalshi({ ladders }));
   if (process.env.ODDS_API_KEY) await step('draftkings', () => refreshDraftKings({ force }));
