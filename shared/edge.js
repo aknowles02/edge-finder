@@ -251,3 +251,30 @@ export function betLabel(b) {
 export function formatOdds(odds) {
   return odds > 0 ? `+${odds}` : `${odds}`.replace('-', '−');
 }
+
+/** Probability -> fair (no-vig) American odds. */
+export function fairOdds(p) {
+  if (p == null || p <= 0 || p >= 1) return null;
+  return p >= 0.5 ? -Math.round((100 * p) / (1 - p)) : Math.round((100 * (1 - p)) / p);
+}
+
+/**
+ * Closing line value in probability points: closing implied − implied at the price you locked.
+ * Positive = the market moved toward your side after you got in.
+ */
+export function closingLineValue(lockedOdds, closingOdds) {
+  if (lockedOdds == null || closingOdds == null) return null;
+  return impliedProbability(closingOdds) - impliedProbability(lockedOdds);
+}
+
+/** Tracked-opportunity summary: results graded at the locked price, plus CLV. */
+export function summarizeTracked(bets) {
+  const base = summarize(bets.map((b) => ({ odds: b.qualifiedOdds ?? b.odds, result: b.result })));
+  const clvs = bets.map((b) => closingLineValue(b.qualifiedOdds ?? b.odds, b.closingOdds)).filter((v) => v != null);
+  return {
+    ...base,
+    clvCount: clvs.length,
+    avgClv: clvs.length ? clvs.reduce((s, v) => s + v, 0) / clvs.length : null,
+    beatClose: clvs.length ? clvs.filter((v) => v > 0).length / clvs.length : null,
+  };
+}

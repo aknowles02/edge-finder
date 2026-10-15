@@ -30,11 +30,15 @@ export function AuthProvider({ children }) {
 
 export const useAuth = () => useContext(AuthContext);
 
-export function RequireAuth({ children, admin = false }) {
+/** `need`: an entitlement from shared/plans.js. Without it, send the user to the subscribe decision page. */
+export function RequireAuth({ children, admin = false, need }) {
   const { user, loading } = useAuth();
   const location = useLocation();
   if (loading) return <div className="grid min-h-[50vh] place-items-center"><Spinner /></div>;
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />;
   if (admin && !user.isAdmin) return <Navigate to="/board" replace />;
+  if (need && !user.entitlements?.includes(need)) return <Navigate to={`/subscribe?need=${need}`} replace />;
   return children;
 }
+
+export const daysLeft = (iso) => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000));

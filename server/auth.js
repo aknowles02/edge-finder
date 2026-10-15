@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { config } from './config.js';
 import { query } from './db.js';
+import { DEFAULT_PLAN, ENTITLEMENTS, PLANS, can, resolveAccess } from '../shared/plans.js';
 
 const COOKIE = 'ef_session';
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -14,22 +15,44 @@ export class HttpError extends Error {
   }
 }
 
-export function isPremium(user) {
-  if (!user) return false;
-  const active = ['active', 'trialing'].includes(user.subscription_status);
-  return active && (!user.current_period_end || new Date(user.current_period_end) > new Date());
+export const isAdmin = (user) => Boolean(user) && config.adminEmails().has(String(user.email).toLowerCase());
+
+/** Admins get every entitlement so they can see what subscribers see. */
+export function accessFor(user) {
+  if (isAdmin(user)) return { ...resolveAccess(user), entitlements: Object.keys(ENTITLEMENTS), sports: '*' };
+  return resolveAccess(user);
 }
 
 export function publicUser(user) {
+  const access = accessFor(user);
+  const plan = PLANS[user.plan_id || DEFAULT_PLAN];
   return {
     id: user.id,
     email: user.email,
-    plan: isPremium(user) ? 'premium' : 'free',
+    plan: access.plan, // 'pro' | 'trial' | 'none'
+    planName: access.plan === 'trial' ? 'Free trial' : plan?.name,
+    entitlements: access.entitlements,
+    trialEndsAt: user.trial_ends_at,
     subscriptionStatus: user.subscription_status,
     currentPeriodEnd: user.current_period_end,
+    cancelAtPeriodEnd: user.cancel_at_period_end,
     alertsOptIn: user.alerts_opt_in,
-    isAdmin: config.adminEmails().has(String(user.email).toLowerCase()),
+    isAdmin: isAdmin(user),
     hasBilling: Boolean(user.stripe_customer_id),
+  };
+}
+
+export function requireEntitlement(entitlement) {
+  return (req, _res, next) => {
+    if (!req.user) throw new HttpError(401, 'Sign in to continue');
+    const access = accessFor(req.user);
+    if (!can(access, entitlement)) {
+      const trialOver = access.plan === 'none';
+      throw new HttpError(402, trialOver ? 'Your free trial has ended. Subscribe to Edge Finder Pro to keep using the board.'
+        : `${ENTITLEMENTS[entitlement]} is included with Edge Finder Pro.`, { entitlement, plan: access.plan });
+    }
+    req.access = access;
+    next();
   };
 }
 

@@ -10,13 +10,15 @@ BUF @ MIA,prop,Josh Allen Pass Yds Over,189.5,-280,82%,11,100%,3`;
 
 export default function Admin() {
   const [boards, setBoards] = useState(null);
+  const [odds, setOdds] = useState(null);
   const [openId, setOpenId] = useState(null);
-  const load = useCallback(() => api.get('/api/admin/boards').then((d) => setBoards(d.boards)), []);
+  const load = useCallback(() => api.get('/api/admin/boards').then((d) => { setBoards(d.boards); setOdds(d.odds); }), []);
   useEffect(() => { load(); }, [load]);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
       <h1 className="text-2xl font-bold text-white">Admin</h1>
+      <OddsPanel odds={odds} onChange={setOdds} />
       <ImportForm onDone={load} />
       <section className="card overflow-hidden">
         <h2 className="border-b border-ink-700 px-5 py-4 font-semibold text-white">Boards</h2>
@@ -40,6 +42,7 @@ function ImportForm({ onDone }) {
   const [oddsMin, setOddsMin] = useState(-500);
   const [oddsMax, setOddsMax] = useState(-200);
   const [mode, setMode] = useState('replace');
+  const [kind, setKind] = useState('live');
   const [csv, setCsv] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -52,7 +55,7 @@ function ImportForm({ onDone }) {
     e.preventDefault();
     setBusy(true); setMsg(null);
     try {
-      const r = await api.post('/api/admin/boards', { season: Number(season), week: Number(week), oddsMin: Number(oddsMin), oddsMax: Number(oddsMax), mode, csv });
+      const r = await api.post('/api/admin/boards', { sport: 'nfl', kind, season: Number(season), week: Number(week), oddsMin: Number(oddsMin), oddsMax: Number(oddsMax), mode, csv });
       setMsg({ tone: 'success', text: `Saved as draft: ${r.inserted} positive-edge bets (${r.skippedNonPositive} dropped at ≤ 0 edge). Publish it below.` });
       setCsv('');
       onDone();
@@ -68,7 +71,13 @@ function ImportForm({ onDone }) {
         <h2 className="font-semibold text-white">Paste this week's alt lines</h2>
         <p className="mt-1 text-sm text-muted">CSV or tab-separated (paste straight from Sheets). Hit rates as 0.86 or 86%. Edge, blend and implied are computed for you.</p>
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
+        <Field label="Type">
+          <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
+            <option value="live">Live board</option>
+            <option value="backtest">Backtest</option>
+          </select>
+        </Field>
         <Field label="Season"><input className="input" type="number" value={season} onChange={(e) => setSeason(e.target.value)} required /></Field>
         <Field label="Week"><input className="input" type="number" min="1" max="22" value={week} onChange={(e) => setWeek(e.target.value)} required /></Field>
         <Field label="Odds min"><input className="input" type="number" value={oddsMin} onChange={(e) => setOddsMin(e.target.value)} /></Field>
@@ -128,9 +137,12 @@ function BoardRow({ board, open, onToggle, onChange }) {
     <li className="px-5 py-4">
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-[160px] flex-1">
-          <div className="font-semibold text-white">{board.season} · Week {board.week}</div>
+          <div className="font-semibold text-white">
+            {board.season} · Week {board.week}
+            {board.kind === 'backtest' && <span className="ml-2 rounded bg-warn/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-warn">Backtest</span>}
+          </div>
           <div className="text-xs text-muted">
-            {board.betCount} bets · {board.ungraded} ungraded · odds {formatOdds(board.oddsMin)} to {formatOdds(board.oddsMax)}
+            {board.betCount} on board · {board.trackedCount} tracked · {board.ungraded} ungraded · odds {formatOdds(board.oddsMin)} to {formatOdds(board.oddsMax)}
             {board.alertedAt && ' · alert sent'}
           </div>
         </div>
@@ -144,7 +156,7 @@ function BoardRow({ board, open, onToggle, onChange }) {
             )}
             <button className="btn-primary py-2" disabled={!!busy} onClick={() => act('pub', async () => {
               const r = await api.post(`/api/admin/boards/${board.id}/publish`, { notify });
-              if (notify && !board.alertedAt) alert(`Published. Alert sent to ${r.alerted} Premium members.`);
+              alert(`Published. ${r.qualified} bets locked as tracked opportunities.${notify && !board.alertedAt ? ` Alert sent to ${r.alerted} Pro members.` : ''}`);
             })}>{busy === 'pub' ? <Spinner className="h-4 w-4" /> : 'Publish'}</button>
           </>
         ) : (
@@ -230,5 +242,38 @@ function ResultsEditor({ boardId, onChange }) {
         </ul>
       </div>
     </div>
+  );
+}
+
+function OddsPanel({ odds, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  if (!odds) return null;
+  async function refresh() {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.post('/api/admin/odds/refresh');
+      onChange(r.odds);
+      setMsg({ tone: r.result.status === 'error' ? 'error' : 'success', text: r.result.status === 'ok' ? `Checked ${r.result.games} games, ${r.result.changed} prices moved.` : r.result.error || `Status: ${r.result.status}` });
+    } catch (err) { setMsg({ tone: 'error', text: err.message }); }
+    setBusy(false);
+  }
+  return (
+    <section className="card flex flex-wrap items-center justify-between gap-4 p-5">
+      <div className="text-sm">
+        <h2 className="font-semibold text-white">Live odds</h2>
+        {odds.enabled ? (
+          <p className="mt-1 text-muted">
+            Last run {odds.lastRunAt ? new Date(odds.lastRunAt).toLocaleString() : 'never'} ({odds.lastRunStatus ?? '—'})
+            {odds.creditsRemaining != null && ` · ${odds.creditsRemaining} API credits left`}
+          </p>
+        ) : <p className="mt-1 text-warn">ODDS_API_KEY isn't set — boards show posted prices only.</p>}
+        {odds.lastError && <p className="mt-1 text-loss-text">{odds.lastError}</p>}
+        {msg && <p className={`mt-1 ${msg.tone === 'error' ? 'text-loss-text' : 'text-win-text'}`}>{msg.text}</p>}
+      </div>
+      <button type="button" className="btn-ghost" disabled={busy || !odds.enabled} onClick={refresh}>
+        {busy ? <Spinner className="h-4 w-4" /> : 'Refresh now'}
+      </button>
+    </section>
   );
 }

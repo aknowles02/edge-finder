@@ -67,3 +67,99 @@ create table if not exists bets (
 );
 create index if not exists bets_board_idx on bets (board_id);
 create index if not exists bets_game_idx on bets (game_id);
+
+-- ── v2: plans + trial, live odds, locked opportunity tracking, backtests ──────────
+
+alter table users add column if not exists plan_id text;
+alter table users add column if not exists trial_ends_at timestamptz;
+alter table users add column if not exists cancel_at_period_end boolean not null default false;
+update users set trial_ends_at = created_at + interval '7 days' where trial_ends_at is null;
+alter table users alter column trial_ends_at set default now() + interval '7 days';
+
+alter table boards add column if not exists sport text not null default 'nfl';
+alter table boards add column if not exists kind text not null default 'live';
+do $$ begin
+  alter table boards add constraint boards_kind_check check (kind in ('live', 'backtest'));
+exception when duplicate_object then null; end $$;
+alter table boards drop constraint if exists boards_season_week_key;
+create unique index if not exists boards_sport_kind_season_week_key on boards (sport, kind, season, week);
+
+alter table games add column if not exists commence_time timestamptz;
+alter table games add column if not exists external_event_id text;
+alter table games add column if not exists odds_checked_at timestamptz;
+
+-- Current price lives in bets.odds/implied/edge and moves with the market.
+alter table bets add column if not exists odds_updated_at timestamptz;
+alter table bets add column if not exists line_moved_at timestamptz;
+alter table bets add column if not exists line_status text not null default 'manual'; -- manual | live | missing
+-- Snapshot taken the moment a bet first qualifies (edge > 0 inside the board's odds window). Never changes.
+alter table bets add column if not exists qualified_at timestamptz;
+alter table bets add column if not exists qualified_odds int;
+alter table bets add column if not exists qualified_prob numeric(6, 4);
+alter table bets add column if not exists qualified_edge numeric(6, 4);
+-- Last price observed before kickoff.
+alter table bets add column if not exists closing_odds int;
+alter table bets add column if not exists closing_at timestamptz;
+
+create table if not exists bet_price_history (
+  id          bigserial primary key,
+  bet_id      bigint not null references bets (id) on delete cascade,
+  odds        int not null,
+  observed_at timestamptz not null default now()
+);
+create index if not exists bet_price_history_bet_idx on bet_price_history (bet_id, observed_at);
+
+create table if not exists odds_refresh_runs (
+  id                bigserial primary key,
+  started_at        timestamptz not null default now(),
+  finished_at       timestamptz,
+  status            text not null default 'running', -- running | ok | error | disabled | idle
+  games_checked     int not null default 0,
+  prices_changed    int not null default 0,
+  credits_remaining int,
+  error             text
+);
+create index if not exists odds_refresh_runs_started_idx on odds_refresh_runs (started_at desc);
+
+-- Locked records: the qualification snapshot can't be edited or deleted once written.
+create or replace function bets_lock_qualified() returns trigger as $$
+begin
+  if old.qualified_at is not null and (
+       new.qualified_at   is distinct from old.qualified_at   or
+       new.qualified_odds is distinct from old.qualified_odds or
+       new.qualified_prob is distinct from old.qualified_prob or
+       new.qualified_edge is distinct from old.qualified_edge) then
+    raise exception 'Qualified opportunity % is locked', old.id;
+  end if;
+  return new;
+end $$ language plpgsql;
+drop trigger if exists bets_lock_qualified on bets;
+create trigger bets_lock_qualified before update on bets for each row execute function bets_lock_qualified();
+
+create or replace function bets_protect_delete() returns trigger as $$
+begin
+  -- Direct deletes only; deleting a whole backtest board cascades (trigger depth > 1).
+  if old.qualified_at is not null and pg_trigger_depth() = 1 then
+    raise exception 'Qualified opportunity % is locked and cannot be deleted', old.id;
+  end if;
+  return old;
+end $$ language plpgsql;
+drop trigger if exists bets_protect_delete on bets;
+create trigger bets_protect_delete before delete on bets for each row execute function bets_protect_delete();
+
+create or replace function boards_protect_live() returns trigger as $$
+begin
+  if old.kind = 'live' and exists (select 1 from bets where board_id = old.id and qualified_at is not null) then
+    raise exception 'Live board % has tracked opportunities and cannot be deleted', old.id;
+  end if;
+  return old;
+end $$ language plpgsql;
+drop trigger if exists boards_protect_live on boards;
+create trigger boards_protect_live before delete on boards for each row execute function boards_protect_live();
+
+-- Backfill: bets already on published boards count as qualified at publish time.
+update bets b set qualified_at = coalesce(bd.published_at, b.created_at), qualified_odds = b.odds,
+                  qualified_prob = b.blended, qualified_edge = b.edge
+  from boards bd
+ where bd.id = b.board_id and bd.status = 'published' and b.qualified_at is null
+   and b.edge > 0 and b.odds between bd.odds_min and bd.odds_max;

@@ -32,8 +32,20 @@ All of this lives in `shared/edge.js`, which both the API and the browser import
 
 ## Plans
 
-- **Free** — current (latest published) week only.
-- **Premium $19.99/mo** — every historical week + email alerts. Enforced server-side (`402` on locked weeks), not just hidden in the UI.
+Defined once in `shared/plans.js` (the API enforces them, the UI renders copy from them).
+
+- **7-day free trial** — automatic on sign-up, no card. Includes the live Edge Board only. Ends on its own.
+- **Edge Finder Pro $19.99/mo** — board + every past board + results/CLV/ROI reports + email alerts.
+  Subscribing mid-trial defers the first charge to the trial's end (Stripe `trial_end`), and checkout states the price, first-charge date and auto-renewal.
+- Adding a tier later (e.g. sport-specific or Elite): add an entry to `PLANS` with its own `stripePriceEnv`, `entitlements` and `sports`. Webhooks map the Stripe price back to the plan.
+
+## Live odds & tracking
+
+- `server/odds.js` re-prices DraftKings alt spreads/totals from [The Odds API](https://the-odds-api.com) (`ODDS_API_KEY`). Cadence speeds up toward kickoff: 6h → 2h → 1h → every 15 min in the last 3 hours. Props stay manual.
+- Scheduler: `.github/workflows/refresh-odds.yml` (template in `deploy/github-refresh-odds.yml`) calls `/api/cron/refresh-odds` every 15 min (add repo secrets `CRON_SECRET` and `APP_URL`); `vercel.json` adds a daily Vercel Cron as a fallback (Hobby plans only allow daily). Both authenticate with `CRON_SECRET`.
+- Every run is logged; the board shows last check / last line move times and warns when a price is stale (not re-checked within 2× its cadence), a line was pulled, or the last refresh failed.
+- A bet becomes a **tracked opportunity** the moment it first qualifies (edge > 0 inside the board's odds window). Its price, probability and edge are snapshotted and locked by database triggers; published live boards with tracked bets can't be unpublished, replaced or deleted. Results and ROI are graded at the locked price; the last pre-kickoff price is stored as the close for CLV.
+- **Backtests** are imported as their own board type, never appear on the Edge Board or the public record, and are reported on a separate, labelled tab.
 
 ## Local development
 

@@ -2,6 +2,7 @@
 // Usage: npm run seed   (refuses to run against a production DATABASE_URL unless FORCE_SEED=1)
 import { gradeBet, parseBoardInput } from '../shared/edge.js';
 import { getPool, tx } from '../server/db.js';
+import { qualifyBets } from '../server/boards.js';
 
 if (process.env.VERCEL_ENV === 'production' && !process.env.FORCE_SEED) {
   console.error('Refusing to seed production.');
@@ -52,10 +53,11 @@ await tx(async (db) => {
     if (errors.length) throw new Error(JSON.stringify(errors));
     const { rows: [board] } = await db.query(
       `insert into boards (season, week, status, published_at) values (2026, $1, 'published', now())
-       on conflict (season, week) do update set status = 'published' returning id`,
+       on conflict (sport, kind, season, week) do update set status = 'published' returning id`,
       [week],
     );
-    await db.query('delete from games where board_id = $1', [board.id]);
+    await db.query(`update boards set status = 'draft' where id = $1`, [board.id]);
+    await db.query('delete from games where board_id = $1', [board.id]); // fresh seed only: locked bets would refuse this
     const gameIds = new Map();
     for (const r of rows.filter((x) => x.edge > 0)) {
       if (!gameIds.has(r.game)) {
@@ -77,6 +79,8 @@ await tx(async (db) => {
           r.blended, r.implied, r.edge, r.sampleSize, result],
       );
     }
+    await db.query(`update boards set status = 'published' where id = $1`, [board.id]);
+    await qualifyBets(db, board.id);
   }
 });
 await getPool().end();

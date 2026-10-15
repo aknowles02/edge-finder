@@ -3,16 +3,36 @@
   "buildCommand": "node scripts/migrate.js && npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/index.js": { "maxDuration": 30, "includeFiles": "{server,shared}/**" }
+    "api/index.js": {
+      "maxDuration": 30,
+      "includeFiles": "{server,shared}/**"
+    }
   },
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api" },
-    { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }
+    {
+      "source": "/api/:path*",
+      "destination": "/api"
+    },
+    {
+      "source": "/((?!api/|assets/).*)",
+      "destination": "/index.html"
+    }
   ],
   "headers": [
     {
       "source": "/assets/(.*)",
-      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/refresh-odds",
+      "schedule": "0 13 * * *"
     }
   ]
 }

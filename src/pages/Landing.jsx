@@ -3,12 +3,13 @@ import { Link } from 'react-router-dom';
 import { formatRecord } from '../../shared/edge.js';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
+import { ENTITLEMENTS, PLANS, TRIAL_DAYS, priceLabel } from '../../shared/plans.js';
 import HitBar from '../components/HitBar.jsx';
 
 const steps = [
   {
     title: 'Price every alt line',
-    body: 'Each week we pull DraftKings alternate spreads, totals and QB props and convert every price to its implied probability.',
+    body: 'We track DraftKings alternate spreads, totals and QB props, re-checking prices on a schedule that speeds up toward kickoff, with timestamps on every line move.',
   },
   {
     title: 'Blend the hit rate',
@@ -45,7 +46,7 @@ export default function Landing() {
           {hasRecord && (
             <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-win/40 bg-win/10 px-3.5 py-1.5 text-xs font-semibold text-win-text sm:text-sm">
               <span className="h-1.5 w-1.5 rounded-full bg-win-text" />
-              Season record: {formatRecord(record)}
+              Tracked record (real bets): {formatRecord(record)}
             </div>
           )}
           <h1 className="text-4xl font-extrabold tracking-tight text-white sm:text-6xl">
@@ -55,9 +56,10 @@ export default function Landing() {
             Alt lines where your edge is real. Track wins. Measure ROI. Bet with data.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Link to={cta} className="btn-primary w-full px-6 py-3 text-base sm:w-auto">See this week's board</Link>
+            <Link to={cta} className="btn-primary w-full px-6 py-3 text-base sm:w-auto">Start 7-day free trial</Link>
             <a href="#pricing" className="btn-ghost w-full px-6 py-3 text-base sm:w-auto">Pricing</a>
           </div>
+          <p className="mt-3 text-xs text-muted-dim">No card required. Then {priceLabel(PLANS.pro)} if you choose to subscribe.</p>
 
           <div className="card mx-auto mt-14 max-w-3xl p-4 text-left sm:p-6">
             <div className="mb-3 flex items-center justify-between text-xs font-medium uppercase tracking-wide text-muted">
@@ -99,12 +101,14 @@ export default function Landing() {
         <h2 className="text-center text-2xl font-bold text-white sm:text-3xl">Simple pricing</h2>
         <div className="mt-10 grid gap-4 md:grid-cols-2">
           <Plan
-            name="Free" price="$0" cta="Start free" to={cta}
-            features={['Current week\'s board', 'All filters and sorting', 'Live W/L, units and ROI']}
+            name={`${TRIAL_DAYS}-day free trial`} price="$0" cta="Start free trial" to={cta}
+            note="No card required. Ends on its own."
+            features={[ENTITLEMENTS.board, 'Sport and market filters', 'Live odds with stale-price warnings']}
           />
           <Plan
-            highlight name="Premium" price="$19.99" period="/mo" cta="Go Premium" to={user ? '/account' : '/login?next=/account'}
-            features={['Every historical week', 'Full season track record by week', 'Email alert the moment a new board drops', 'Cancel anytime']}
+            highlight name={PLANS.pro.name} price={`$${(PLANS.pro.priceCents / 100).toFixed(2)}`} period="/mo" cta="See Pro" to="/subscribe"
+            note="Renews monthly until you cancel. Cancel anytime."
+            features={PLANS.pro.entitlements.map((k) => ENTITLEMENTS[k])}
           />
         </div>
       </section>
@@ -112,7 +116,7 @@ export default function Landing() {
   );
 }
 
-function Plan({ name, price, period, features, cta, to, highlight }) {
+function Plan({ name, price, period, features, cta, to, highlight, note }) {
   return (
     <div className={`card flex flex-col p-6 sm:p-8 ${highlight ? 'border-win/60 ring-1 ring-win/40' : ''}`}>
       <div className="flex items-center justify-between">
@@ -120,6 +124,7 @@ function Plan({ name, price, period, features, cta, to, highlight }) {
         {highlight && <span className="rounded-full bg-win/20 px-2.5 py-1 text-xs font-semibold text-win-text">Most popular</span>}
       </div>
       <div className="mt-4 text-4xl font-extrabold text-white">{price}<span className="text-base font-medium text-muted">{period}</span></div>
+      {note && <p className="mt-1 text-xs text-muted">{note}</p>}
       <ul className="mt-6 flex-1 space-y-3 text-sm text-slate-300">
         {features.map((f) => (
           <li key={f} className="flex gap-2.5">

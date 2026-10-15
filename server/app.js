@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.js';
 import boardRoutes from './routes/boards.js';
 import adminRoutes from './routes/admin.js';
 import billingRoutes, { stripeWebhook } from './routes/billing.js';
+import cronRoutes from './routes/cron.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -20,7 +21,7 @@ app.use('/api', sameOrigin, attachUser);
 app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
-app.use('/api', authRoutes, boardRoutes, billingRoutes, adminRoutes);
+app.use('/api', authRoutes, boardRoutes, billingRoutes, adminRoutes, cronRoutes);
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 

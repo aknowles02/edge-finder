@@ -2,8 +2,11 @@ import { Router } from 'express';
 import { gradeBet, parseBoardInput } from '../../shared/edge.js';
 import { config } from '../config.js';
 import { query, tx } from '../db.js';
+import { SPORTS } from '../../shared/sports.js';
+import { PLANS } from '../../shared/plans.js';
 import { HttpError, requireAdmin } from '../auth.js';
-import { loadBoard, toBoard } from '../boards.js';
+import { loadBoard, qualifyBets, toBoard } from '../boards.js';
+import { oddsStatus, refreshOdds } from '../odds.js';
 import { sendBoardAlert } from '../email.js';
 
 const router = Router();
@@ -25,15 +28,19 @@ router.get('/admin/boards', async (_req, res) => {
   const { rows } = await query(
     `select bd.*,
             count(b.*) filter (where b.edge > 0)::int as bet_count,
-            count(b.*) filter (where b.edge > 0 and b.result is null)::int as ungraded
+            count(b.*) filter (where b.qualified_at is not null)::int as tracked_count,
+            count(b.*) filter (where b.qualified_at is not null and b.result is null)::int as ungraded
        from boards bd left join bets b on b.board_id = bd.id
-      group by bd.id order by season desc, week desc`,
+      group by bd.id order by kind, season desc, week desc`,
   );
-  res.json({ boards: rows.map((r) => ({ ...toBoard(r), betCount: r.bet_count, ungraded: r.ungraded })) });
+  res.json({
+    boards: rows.map((r) => ({ ...toBoard(r), betCount: r.bet_count, trackedCount: r.tracked_count, ungraded: r.ungraded })),
+    odds: await oddsStatus(),
+  });
 });
 
 router.get('/admin/boards/:id', async (req, res) => {
-  res.json({ board: await loadBoard(await boardById(req.params.id)) });
+  res.json({ board: await loadBoard(await boardById(req.params.id), { view: 'all' }) });
 });
 
 /** Paste odds for a week. Creates the board (as draft) or replaces/appends its bets. */
@@ -44,6 +51,9 @@ router.post('/admin/boards', async (req, res) => {
   const oddsMax = int(req.body?.oddsMax ?? -200, 'max odds', { min: -100000, max: 100000 });
   if (oddsMin > oddsMax) throw new HttpError(400, 'Min odds must be ≤ max odds (e.g. −500 to −200)');
   const mode = req.body?.mode === 'append' ? 'append' : 'replace';
+  const sport = String(req.body?.sport || 'nfl');
+  if (!SPORTS[sport]) throw new HttpError(400, 'Unknown sport');
+  const kind = req.body?.kind === 'backtest' ? 'backtest' : 'live';
 
   const { rows, errors } = parseBoardInput(String(req.body?.csv ?? ''));
   if (errors.length) throw new HttpError(400, `Fix ${errors.length} row(s) and re-paste`, { errors });
@@ -51,11 +61,15 @@ router.post('/admin/boards', async (req, res) => {
 
   const boardId = await tx(async (db) => {
     const { rows: [board] } = await db.query(
-      `insert into boards (season, week, odds_min, odds_max) values ($1, $2, $3, $4)
-       on conflict (season, week) do update set odds_min = excluded.odds_min, odds_max = excluded.odds_max
-       returning id`,
-      [season, week, oddsMin, oddsMax],
+      `insert into boards (sport, kind, season, week, odds_min, odds_max) values ($1, $2, $3, $4, $5, $6)
+       on conflict (sport, kind, season, week) do update set odds_min = excluded.odds_min, odds_max = excluded.odds_max
+       returning id, published_at`,
+      [sport, kind, season, week, oddsMin, oddsMax],
     );
+    // Once a live board has been published its opportunities are on the record: append only.
+    if (mode === 'replace' && board.published_at && kind === 'live') {
+      throw new HttpError(409, 'This live board has already been published, so its tracked bets are locked. Use Append to add lines.');
+    }
     if (mode === 'replace') await db.query('delete from bets where board_id = $1', [board.id]);
 
     const gameIds = new Map();
@@ -81,6 +95,7 @@ router.post('/admin/boards', async (req, res) => {
     if (mode === 'replace') {
       await db.query('delete from games g where board_id = $1 and not exists (select 1 from bets b where b.game_id = g.id)', [board.id]);
     }
+    await qualifyBets(db, board.id);
     return board.id;
   });
 
@@ -93,34 +108,51 @@ router.post('/admin/boards/:id/publish', async (req, res) => {
     `update boards set status = 'published', published_at = coalesce(published_at, now()) where id = $1 returning *`,
     [board.id],
   );
+  const qualified = await qualifyBets({ query }, board.id);
 
   let alerted = 0;
   if (req.body?.notify && !updated.alerted_at) {
     const { rows: recipients } = await query(
       `select email from users
-        where alerts_opt_in and subscription_status in ('active', 'trialing')
+        where alerts_opt_in and subscription_status in ('active', 'trialing', 'past_due')
+          and coalesce(plan_id, 'pro') = any($1)
           and (current_period_end is null or current_period_end > now())`,
+      [Object.values(PLANS).filter((p) => p.entitlements.includes('alerts')).map((p) => p.id)],
     );
     const { rows: [{ count }] } = await query('select count(*)::int as count from bets where board_id = $1 and edge > 0', [board.id]);
     await sendBoardAlert(recipients.map((r) => r.email), {
       season: updated.season, week: updated.week, count,
-      url: `${config.appUrl()}/board/${updated.season}/${updated.week}`,
+      url: `${config.appUrl()}/board`,
     });
     await query('update boards set alerted_at = now() where id = $1', [board.id]);
     alerted = recipients.length;
   }
-  res.json({ board: toBoard(updated), alerted });
+  res.json({ board: toBoard(updated), alerted, qualified });
 });
 
 router.post('/admin/boards/:id/unpublish', async (req, res) => {
+  const board = await boardById(req.params.id);
+  const { rows: [{ n }] } = await query('select count(*)::int as n from bets where board_id = $1 and qualified_at is not null', [board.id]);
+  if (board.kind === 'live' && n > 0) {
+    throw new HttpError(409, 'This live board has tracked opportunities. Unpublishing would hide them from the record, so it is not allowed.');
+  }
   const { rows: [b] } = await query(`update boards set status = 'draft' where id = $1 returning *`, [int(req.params.id, 'board id')]);
   if (!b) throw new HttpError(404, 'Board not found');
   res.json({ board: toBoard(b) });
 });
 
 router.delete('/admin/boards/:id', async (req, res) => {
-  await query('delete from boards where id = $1', [int(req.params.id, 'board id')]);
+  try {
+    await query('delete from boards where id = $1', [int(req.params.id, 'board id')]);
+  } catch (err) {
+    if (/locked|cannot be deleted/.test(err.message)) throw new HttpError(409, err.message);
+    throw err;
+  }
   res.status(204).end();
+});
+
+router.post('/admin/odds/refresh', async (_req, res) => {
+  res.json({ result: await refreshOdds({ force: true }), odds: await oddsStatus() });
 });
 
 /** Enter final scores; spreads and totals on those games grade themselves. */
@@ -146,7 +178,7 @@ router.post('/admin/boards/:id/scores', async (req, res) => {
       }
     }
   });
-  res.json({ graded, board: await loadBoard(board) });
+  res.json({ graded, board: await loadBoard(board, { view: 'all' }) });
 });
 
 /** Manual grade / override — used for props. */

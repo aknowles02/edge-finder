@@ -1,0 +1,22 @@
+# Calls the live-odds refresher every 15 minutes. The endpoint decides which games are actually due
+# (every 15 min near kickoff, hourly the day before, every few hours earlier), so this stays cheap.
+# Setup: repo Settings → Secrets and variables → Actions → add CRON_SECRET (same value as on Vercel)
+# and APP_URL (e.g. https://edge-finder-wine.vercel.app).
+name: Refresh odds
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+permissions: {}
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger refresh
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ secrets.APP_URL }}
+        run: |
+          if [ -z "$CRON_SECRET" ] || [ -z "$APP_URL" ]; then echo "CRON_SECRET / APP_URL secrets not set"; exit 1; fi
+          curl -fsS --retry 3 --retry-delay 10 -m 120 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/refresh-odds"
