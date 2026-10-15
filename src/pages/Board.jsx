@@ -111,7 +111,7 @@ export default function Board() {
     <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-8">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-win-text">Edge Board · DraftKings alt lines</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-win-text">Edge Board · Kalshi &amp; DraftKings alt lines</p>
           <h1 className="mt-1 text-2xl font-bold text-white sm:text-3xl">
             {board ? `${board.season} Week ${board.week}` : season ? `Week ${week}` : 'This week'}
             {history && <span className="ml-2 align-middle text-sm font-medium text-muted">archive</span>}
@@ -418,9 +418,10 @@ function BetTable({ rows, sort, onSort, history }) {
                   <td className="whitespace-nowrap px-3 py-3">
                     <div className="text-slate-200">{b.game}</div>
                     {b.commenceTime && <div className="text-[11px] text-muted-dim">{b.started ? 'Started' : kickoff(b.commenceTime)}</div>}
+                    {b.flags && <div className="max-w-[180px] whitespace-normal text-[11px] text-warn" title={b.flags}>⚠ QB change</div>}
                   </td>
                   <td className="px-3 py-3">
-                    <div className="text-[11px] text-muted">{MARKET_NAME[b.market]}</div>
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted">{MARKET_NAME[b.market]} <VenueTag venue={b.venue} /></div>
                     <div className="whitespace-nowrap font-semibold text-white">{betLabel(b)}</div>
                   </td>
                   <td className="px-3 py-3 text-right"><OddsCell bet={b} history={history} /></td>
@@ -457,7 +458,8 @@ function BetCards({ rows, history }) {
               <div className="min-w-0">
                 <div className="text-[11px] text-muted">#{i + 1} · {b.game}{b.commenceTime && !b.started ? ` · ${kickoff(b.commenceTime)}` : ''}</div>
                 <div className="mt-0.5 font-semibold text-white">{betLabel(b)}</div>
-                <div className="text-[11px] text-muted-dim">{MARKET_NAME[b.market]}</div>
+                <div className="flex items-center gap-1.5 text-[11px] text-muted-dim">{MARKET_NAME[b.market]} <VenueTag venue={b.venue} /></div>
+                {b.flags && <div className="text-[11px] text-warn">⚠ {b.flags}</div>}
               </div>
               <div className="text-right">
                 <div className="text-lg font-bold tabular-nums text-win-text">{signedPct(edge)}</div>
@@ -492,6 +494,7 @@ function Methodology({ history }) {
         <p><b className="text-muted">Est. prob</b> is a historical hit rate: 75% from the full 2025 season, 25% from 2026 to date (props: QB games with 15+ attempts). It is an estimate, not a guarantee. <span className="text-warn">●</span> flags samples under {SMALL_SAMPLE} games.</p>
         <p><b className="text-muted">Fair odds</b> converts that probability to American odds. <b className="text-muted">Edge</b> = est. prob − the price's implied probability (|odds| ÷ (|odds| + 100)).</p>
         <p>Lines on the same side of a game are correlated; “Best line per side” keeps just one.</p>
+        <p><b className="text-muted">Kalshi</b> prices are the current ask converted to American odds, with Kalshi's taker fee (0.07 × P × (1 − P)) included, so the edge is what you'd actually get. ⚠ marks games where a team's latest starting QB differs from its usual starter — the history may not reflect who's playing.</p>
         {history && <p><b className="text-muted">Locked odds</b> is the price when the bet first qualified; results and ROI are graded at that price. <b className="text-muted">CLV</b> is the closing implied probability minus the locked implied probability — positive means the market moved your way.</p>}
       </div>
     </details>
@@ -511,4 +514,10 @@ function LockedCard({ error }) {
       </div>
     </div>
   );
+}
+
+function VenueTag({ venue }) {
+  if (!venue) return null;
+  const k = venue === 'kalshi';
+  return <span className={`rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide ${k ? 'bg-[#1d3b5c] text-[#8cc4ff]' : 'bg-ink-700 text-muted'}`}>{k ? 'Kalshi' : 'DK'}</span>;
 }

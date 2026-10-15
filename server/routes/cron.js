@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { HttpError } from '../auth.js';
-import { refreshOdds } from '../odds.js';
+import { runPipeline } from '../pipeline.js';
 
 const router = Router();
 
@@ -16,7 +16,7 @@ function requireCronSecret(req, _res, next) {
 }
 
 router.get('/cron/refresh-odds', requireCronSecret, async (_req, res) => {
-  res.json(await refreshOdds());
+  res.json((await runPipeline()) ?? { skipped: 'ran recently' });
 });
 
 export default router;

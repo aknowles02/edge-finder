@@ -52,3 +52,36 @@ test('matches feed events and alt-line prices', () => {
   assert.equal(matchPrice('nfl', { market: 'total', selection: 'Over', line: 37.5 }, game, odds), -365);
   assert.equal(matchPrice('nfl', { market: 'spread', selection: 'BUF', line: 3.5 }, game, odds), null);
 });
+
+import { canonTeam, spreadHitRate, teamLogs, totalHitRate, qbChangeFlag } from '../shared/hitrates.js';
+import { betsFromEntry, costToAmerican, effectiveCost, parseEventTicker, teamsMatch } from '../server/kalshi.js';
+import { easternToUtc } from '../server/nflverse.js';
+
+test('hit rates pool both teams from the right side', () => {
+  const games = [
+    { season: 2025, week: 1, gameday: '2025-09-07', away: 'BUF', home: 'MIA', awayScore: 24, homeScore: 20, awayQb: 'A', homeQb: 'T' },
+    { season: 2025, week: 2, gameday: '2025-09-14', away: 'BUF', home: 'NYJ', awayScore: 10, homeScore: 13, awayQb: 'A', homeQb: 'X' },
+  ];
+  const logs = teamLogs(games, 2025);
+  // BUF +2.5: BUF games margins +4 (cover), −3 (no). MIA games: margin −4; MIA "fails to cover" −2.5 → hit.
+  const r = spreadHitRate(logs, 'BUF', 'MIA', 2.5);
+  assert.equal(r.n, 3);
+  assert.equal(r.rate, 2 / 3);
+  assert.equal(totalHitRate(logs, 'BUF', 'MIA', 30.5, 'Over').rate, 2 / 3);
+  assert.equal(qbChangeFlag(logs, 'BUF'), null);
+});
+
+test('Kalshi parsing, fee and bet expansion', () => {
+  assert.deepEqual(parseEventTicker('KXNFLSPREAD-26OCT19WASSF'), { date: '2026-10-19', teams: 'WASSF' });
+  assert.ok(teamsMatch('HOUJAC', 'HOU', canonTeam('JAX')));
+  assert.ok(teamsMatch('ARILAR', 'ARI', canonTeam('LA')));
+  assert.ok(effectiveCost(0.75) > 0.75);
+  assert.equal(costToAmerican(0.75), -300);
+  const bets = betsFromEntry({ ticker: 'T', kind: 'spread', team: 'WAS', strike: 6.5, yesAsk: 0.1, noAsk: 0.91 }, 'WAS', 'SF');
+  assert.deepEqual(bets.map((b) => `${b.selection} ${b.line} ${b.side}`), ['WAS -6.5 yes', 'SF 6.5 no']);
+});
+
+test('Eastern kickoff converts to UTC across DST', () => {
+  assert.equal(easternToUtc('2026-10-18', '13:00'), '2026-10-18T17:00:00.000Z');
+  assert.equal(easternToUtc('2026-12-06', '13:00'), '2026-12-06T18:00:00.000Z');
+});

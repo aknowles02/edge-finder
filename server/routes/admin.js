@@ -6,7 +6,8 @@ import { SPORTS } from '../../shared/sports.js';
 import { PLANS } from '../../shared/plans.js';
 import { HttpError, requireAdmin } from '../auth.js';
 import { loadBoard, qualifyBets, toBoard } from '../boards.js';
-import { oddsStatus, refreshOdds } from '../odds.js';
+import { oddsStatus } from '../odds.js';
+import { runPipeline } from '../pipeline.js';
 import { sendBoardAlert } from '../email.js';
 
 const router = Router();
@@ -151,8 +152,8 @@ router.delete('/admin/boards/:id', async (req, res) => {
   res.status(204).end();
 });
 
-router.post('/admin/odds/refresh', async (_req, res) => {
-  res.json({ result: await refreshOdds({ force: true }), odds: await oddsStatus() });
+router.post('/admin/odds/refresh', async (req, res) => {
+  res.json({ result: await runPipeline({ force: true, build: Boolean(req.body?.build) }), odds: await oddsStatus() });
 });
 
 /** Enter final scores; spreads and totals on those games grade themselves. */

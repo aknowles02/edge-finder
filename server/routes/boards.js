@@ -6,6 +6,7 @@ import { query } from '../db.js';
 import { HttpError, requireEntitlement } from '../auth.js';
 import { loadBoard, officialRecord, recordsByBoard, toBoard, trackedRows } from '../boards.js';
 import { oddsStatus } from '../odds.js';
+import { freshen } from '../background.js';
 
 const router = Router();
 
@@ -28,6 +29,7 @@ async function liveBoards(sport) {
 
 // Public: the real (non-backtest) track record powers the landing page.
 router.get('/stats', async (_req, res) => {
+  freshen();
   res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
   res.json({ record: await officialRecord() });
 });
@@ -65,6 +67,7 @@ async function sendBoard(req, res, row) {
 
 router.get('/boards/current', requireEntitlement('board'), async (req, res) => {
   const sport = sportParam(req);
+  await freshen({ waitMs: 8000 });
   const { rows } = await query(
     `select * from boards where status = 'published' and kind = 'live' and sport = $1 order by season desc, week desc limit 1`, [sport]);
   await sendBoard(req, res, rows[0]);

@@ -59,107 +59,65 @@ async function fetchJson(path, params) {
 }
 
 /**
- * One refresh pass. `force` re-prices every open game regardless of cadence (admin "Refresh now").
- * Every run is logged in odds_refresh_runs so the UI can show freshness and failures honestly.
+ * DraftKings re-pricing via The Odds API (optional — only when ODDS_API_KEY is set).
+ * Only touches games that are due on the cadence above. Called from the pipeline, which logs the run.
  */
-export async function refreshOdds({ force = false } = {}) {
-  const { rows: [run] } = await query(`insert into odds_refresh_runs default values returning id`);
-  const finish = (status, fields = {}) => query(
-    `update odds_refresh_runs set finished_at = now(), status = $2, games_checked = $3, prices_changed = $4,
-            credits_remaining = $5, error = $6 where id = $1`,
-    [run.id, status, fields.games ?? 0, fields.changed ?? 0, fields.remaining ?? null, fields.error ?? null],
-  );
-
-  if (!process.env.ODDS_API_KEY) {
-    await finish('disabled', { error: 'ODDS_API_KEY not set' });
-    return { status: 'disabled' };
-  }
-
+export async function refreshDraftKings({ force = false } = {}) {
   let games = 0, changed = 0, remaining = null;
-  try {
-    const { rows: open } = await query(
-      `select g.*, bd.sport, bd.id as board_id from games g join boards bd on bd.id = g.board_id
-        where bd.kind = 'live' and bd.status = 'published'
-          and (g.commence_time is null or g.commence_time > now() - interval '6 hours')
-          and g.away_score is null`,
-    );
-    const now = Date.now();
-
-    // Lock closing prices for anything that has kicked off.
-    await query(
-      `update bets b set closing_odds = b.odds, closing_at = now()
-         from games g where g.id = b.game_id and g.commence_time <= now() and b.closing_odds is null and b.line_status = 'live'`,
-    );
-
-    const bySport = new Map();
-    for (const g of open) {
-      if (!SPORTS[g.sport]?.oddsKey) continue;
-      const start = g.commence_time ? new Date(g.commence_time).getTime() : null;
-      if (start && start <= now) continue;
-      const due = force || !g.odds_checked_at || now - new Date(g.odds_checked_at).getTime() >= refreshIntervalMs(start, now) - MIN;
-      if (!due) continue;
-      if (!bySport.has(g.sport)) bySport.set(g.sport, []);
-      bySport.get(g.sport).push(g);
-    }
-    if (!bySport.size) {
-      await finish('idle');
-      return { status: 'idle' };
-    }
-
-    for (const [sport, list] of bySport) {
-      const spec = SPORTS[sport];
-      const { data: events, remaining: r1 } = await fetchJson(`/sports/${spec.oddsKey}/events`);
-      remaining = r1 ?? remaining;
-      for (const g of list) {
-        const event = g.external_event_id ? events.find((e) => e.id === g.external_event_id) ?? matchEvent(sport, g, events) : matchEvent(sport, g, events);
-        if (!event) continue;
-        const { data: eventOdds, remaining: r2 } = await fetchJson(`/sports/${spec.oddsKey}/events/${event.id}/odds`, {
-          regions: 'us', bookmakers: BOOKMAKER, oddsFormat: 'american', markets: Object.values(spec.markets).join(','),
-        });
-        remaining = r2 ?? remaining;
-        games++;
-        changed += await tx(async (db) => {
-          await db.query('update games set external_event_id = $1, commence_time = $2, odds_checked_at = now() where id = $3',
-            [event.id, event.commence_time, g.id]);
-          const { rows: bets } = await db.query(`select * from bets where game_id = $1 and market <> 'prop'`, [g.id]);
-          let n = 0;
-          for (const b of bets) {
-            const price = matchPrice(sport, b, g, eventOdds);
-            if (price == null) {
-              await db.query(`update bets set line_status = 'missing', odds_updated_at = now() where id = $1`, [b.id]);
-              continue;
-            }
-            const implied = impliedProbability(price);
-            const moved = price !== b.odds;
-            await db.query(
-              `update bets set odds = $2, implied = $3, edge = blended - $3, line_status = 'live', odds_updated_at = now(),
-                      line_moved_at = case when $4 then now() else line_moved_at end
-                where id = $1`,
-              [b.id, price, implied, moved],
-            );
-            if (moved || b.line_status !== 'live') {
-              await db.query('insert into bet_price_history (bet_id, odds) values ($1, $2)', [b.id, price]);
-            }
-            if (moved) n++;
-          }
-          // Newly qualifying lines become tracked opportunities with a locked snapshot.
-          await db.query(
-            `update bets b set qualified_at = now(), qualified_odds = b.odds, qualified_prob = b.blended, qualified_edge = b.edge
-               from boards bd where bd.id = b.board_id and b.game_id = $1 and b.qualified_at is null
-                and b.edge > 0 and b.odds between bd.odds_min and bd.odds_max`,
-            [g.id],
-          );
-          return n;
-        });
-      }
-    }
-    await finish('ok', { games, changed, remaining });
-    return { status: 'ok', games, changed, remaining };
-  } catch (err) {
-    console.error('[odds refresh]', err);
-    await finish('error', { games, changed, remaining, error: err.message.slice(0, 500) });
-    return { status: 'error', error: err.message };
+  const { rows: open } = await query(
+    `select g.*, bd.sport, bd.id as board_id from games g join boards bd on bd.id = g.board_id
+      where bd.kind = 'live' and bd.status = 'published' and g.away_score is null
+        and exists (select 1 from bets b where b.game_id = g.id and b.venue = 'draftkings' and b.market <> 'prop')
+        and (g.commence_time is null or g.commence_time > now())`,
+  );
+  const now = Date.now();
+  const bySport = new Map();
+  for (const g of open) {
+    if (!SPORTS[g.sport]?.oddsKey) continue;
+    const start = g.commence_time ? new Date(g.commence_time).getTime() : null;
+    const due = force || !g.odds_checked_at || now - new Date(g.odds_checked_at).getTime() >= refreshIntervalMs(start, now) - MIN;
+    if (!due) continue;
+    if (!bySport.has(g.sport)) bySport.set(g.sport, []);
+    bySport.get(g.sport).push(g);
   }
+  for (const [sport, list] of bySport) {
+    const spec = SPORTS[sport];
+    const { data: events, remaining: r1 } = await fetchJson(`/sports/${spec.oddsKey}/events`);
+    remaining = r1 ?? remaining;
+    for (const g of list) {
+      const event = matchEvent(sport, g, events);
+      if (!event) continue;
+      const { data: eventOdds, remaining: r2 } = await fetchJson(`/sports/${spec.oddsKey}/events/${event.id}/odds`, {
+        regions: 'us', bookmakers: BOOKMAKER, oddsFormat: 'american', markets: Object.values(spec.markets).join(','),
+      });
+      remaining = r2 ?? remaining;
+      games++;
+      changed += await tx(async (db) => {
+        await db.query('update games set commence_time = coalesce(commence_time, $1), odds_checked_at = now() where id = $2', [event.commence_time, g.id]);
+        const { rows: bets } = await db.query(`select * from bets where game_id = $1 and venue = 'draftkings' and market <> 'prop'`, [g.id]);
+        let n = 0;
+        for (const b of bets) {
+          const price = matchPrice(sport, b, g, eventOdds);
+          if (price == null) {
+            await db.query(`update bets set line_status = 'missing', odds_updated_at = now() where id = $1`, [b.id]);
+            continue;
+          }
+          const implied = impliedProbability(price);
+          const moved = price !== b.odds;
+          await db.query(
+            `update bets set odds = $2, implied = $3, edge = blended - $3, line_status = 'live', odds_updated_at = now(),
+                    line_moved_at = case when $4 then now() else line_moved_at end
+              where id = $1`,
+            [b.id, price, implied, moved],
+          );
+          if (moved || b.line_status !== 'live') await db.query('insert into bet_price_history (bet_id, odds) values ($1, $2)', [b.id, price]);
+          if (moved) n++;
+        }
+        return n;
+      });
+    }
+  }
+  return { games, changed, remaining };
 }
 
 export async function oddsStatus() {
@@ -169,7 +127,8 @@ export async function oddsStatus() {
   );
   const last = rows[0]?.last_run;
   return {
-    enabled: Boolean(process.env.ODDS_API_KEY),
+    enabled: true, // Kalshi prices are always on; DraftKings re-pricing additionally needs ODDS_API_KEY
+    draftkingsEnabled: Boolean(process.env.ODDS_API_KEY),
     lastRunAt: last?.started_at ?? null,
     lastRunStatus: last?.status ?? null,
     lastError: last?.status === 'error' ? last.error : null,

@@ -39,6 +39,19 @@ Defined once in `shared/plans.js` (the API enforces them, the UI renders copy fr
   Subscribing mid-trial defers the first charge to the trial's end (Stripe `trial_end`), and checkout states the price, first-charge date and auto-renewal.
 - Adding a tier later (e.g. sport-specific or Elite): add an entry to `PLANS` with its own `stripePriceEnv`, `entitlements` and `sports`. Webhooks map the Stripe price back to the plan.
 
+## Automated boards (no pasting required)
+
+`server/pipeline.js` runs on page views (throttled to once per 90s), Vercel Cron, the admin button, or `GET /api/tick` (point any free uptime pinger at it). Each run:
+
+1. **Builds this week's board** (hourly) — every Kalshi alt spread/total rung (`KXNFLSPREAD`, `KXNFLTOTAL`, public API, no key) for the week's open games, scored with nflverse hit rates: spreads pool both teams' logs from the right side, totals pool both teams' games, blended 75% 2025 / 25% 2026-to-date. Lines from −150 to −1000 are stored; the board window (−200 to −500) decides what qualifies. Auto-publishes unless `AUTO_PUBLISH_BOARDS=0`.
+2. **Re-prices** every open Kalshi line (ask + Kalshi's taker fee → American odds), logs moves, flags pulled lines.
+3. **Locks closing prices** at kickoff and **qualifies** newly positive-edge lines.
+4. **Grades** finished games from nflverse finals (every 30 min). Props stay manual.
+
+Games where a team's latest starting QB differs from its usual starter are flagged ⚠. Dry-run with live data and no database: `node scripts/preview-week.js [week]`.
+
+DraftKings' own API blocks server requests, so DraftKings prices come from pasted boards (optionally re-priced via The Odds API with `ODDS_API_KEY`).
+
 ## Live odds & tracking
 
 - `server/odds.js` re-prices DraftKings alt spreads/totals from [The Odds API](https://the-odds-api.com) (`ODDS_API_KEY`). Cadence speeds up toward kickoff: 6h → 2h → 1h → every 15 min in the last 3 hours. Props stay manual.

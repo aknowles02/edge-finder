@@ -10,13 +10,13 @@ export function toBoard(r) {
   };
 }
 
-/** A price is stale when it hasn't been confirmed within 2× the refresh cadence for that game. */
-function staleness(game, now = Date.now()) {
-  if (!game.external_event_id) return { tracked: false, stale: false };
-  const start = game.commence_time ? new Date(game.commence_time).getTime() : null;
+/** A price is stale when it hasn't been confirmed recently: 20 min for Kalshi, 2× the cadence for DraftKings. */
+function staleness(row, now = Date.now()) {
+  if (row.line_status === 'manual') return { tracked: false, stale: false };
+  const start = row.commence_time ? new Date(row.commence_time).getTime() : null;
   if (start && start <= now) return { tracked: true, stale: false, started: true };
-  const checked = game.odds_checked_at ? new Date(game.odds_checked_at).getTime() : 0;
-  const limit = 2 * refreshIntervalMs(start, now) + 5 * 60 * 1000;
+  const checked = row.odds_updated_at ? new Date(row.odds_updated_at).getTime() : 0;
+  const limit = row.venue === 'kalshi' ? 20 * 60 * 1000 : 2 * refreshIntervalMs(start, now) + 5 * 60 * 1000;
   return { tracked: true, stale: now - checked > limit };
 }
 
@@ -29,14 +29,14 @@ function toBet(r) {
     hit2025: r.hit_2025, n2025: r.n_2025, hit2026: r.hit_2026, n2026: r.n_2026,
     blended: r.blended, implied: r.implied, edge: r.edge, sampleSize: r.sample_size,
     oddsUpdatedAt: r.odds_updated_at ?? r.created_at, lineMovedAt: r.line_moved_at,
-    lineStatus: r.line_status, liveTracked: s.tracked, stale: s.stale,
+    lineStatus: r.line_status, liveTracked: s.tracked, stale: s.stale, venue: r.venue, flags: r.flags,
     qualifiedAt: r.qualified_at, qualifiedOdds: r.qualified_odds, qualifiedProb: r.qualified_prob, qualifiedEdge: r.qualified_edge,
     closingOdds: r.closing_odds, result: r.result,
   };
 }
 
 const BET_SELECT = `
-  select b.*, g.label as game_label, g.away, g.home, g.commence_time, g.external_event_id, g.odds_checked_at
+  select b.*, g.label as game_label, g.away, g.home, g.commence_time, g.external_event_id, g.odds_checked_at, g.flags
     from bets b join games g on g.id = b.game_id`;
 
 /**
@@ -54,7 +54,7 @@ export async function loadBoard(boardRow, { view = 'current' } = {}) {
     view,
     games: games.map((g) => ({
       id: g.id, label: g.label, away: g.away, home: g.home, commenceTime: g.commence_time,
-      awayScore: g.away_score, homeScore: g.home_score, liveTracked: Boolean(g.external_event_id), oddsCheckedAt: g.odds_checked_at,
+      awayScore: g.away_score, homeScore: g.home_score, liveTracked: Boolean(g.external_event_id), oddsCheckedAt: g.odds_checked_at, flags: g.flags,
     })),
     bets: bets.map(toBet),
   };

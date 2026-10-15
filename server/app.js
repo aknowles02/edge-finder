@@ -21,6 +21,14 @@ app.use('/api', sameOrigin, attachUser);
 app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+// Public, throttled freshness kick — safe to point any free uptime pinger at it.
+app.get('/api/tick', async (_req, res) => {
+  const { freshen } = await import('./background.js');
+  const { oddsStatus } = await import('./odds.js');
+  await freshen({ waitMs: 25_000 });
+  const s = await oddsStatus();
+  res.set('Cache-Control', 'no-store').json({ ok: true, lastRunAt: s.lastRunAt, lastRunStatus: s.lastRunStatus, lastSuccessAt: s.lastSuccessAt, lastError: s.lastError });
+});
 app.use('/api', authRoutes, boardRoutes, billingRoutes, adminRoutes, cronRoutes);
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));

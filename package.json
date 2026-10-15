@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently -k -n api,web -c green,cyan \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "node --watch --env-file-if-exists=.env server/dev.js",
@@ -15,6 +17,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "@vercel/functions": "^2.2.13",
     "cookie-parser": "^1.4.7",
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",

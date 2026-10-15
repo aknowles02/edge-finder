@@ -18,7 +18,7 @@ export default function Admin() {
   return (
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
       <h1 className="text-2xl font-bold text-white">Admin</h1>
-      <OddsPanel odds={odds} onChange={setOdds} />
+      <OddsPanel odds={odds} onChange={setOdds} onLoad={load} />
       <ImportForm onDone={load} />
       <section className="card overflow-hidden">
         <h2 className="border-b border-ink-700 px-5 py-4 font-semibold text-white">Boards</h2>
@@ -245,35 +245,46 @@ function ResultsEditor({ boardId, onChange }) {
   );
 }
 
-function OddsPanel({ odds, onChange }) {
+function OddsPanel({ odds, onChange, onLoad }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   if (!odds) return null;
-  async function refresh() {
+  async function refresh(build = false) {
     setBusy(true); setMsg(null);
     try {
-      const r = await api.post('/api/admin/odds/refresh');
+      const r = await api.post('/api/admin/odds/refresh', { build });
       onChange(r.odds);
-      setMsg({ tone: r.result.status === 'error' ? 'error' : 'success', text: r.result.status === 'ok' ? `Checked ${r.result.games} games, ${r.result.changed} prices moved.` : r.result.error || `Status: ${r.result.status}` });
+      const x = r.result ?? {};
+      const parts = [];
+      if (x.build) parts.push(x.build.note || x.build.skipped || `Week ${x.build.week}: ${x.build.games} games, ${x.build.bets} lines${x.build.published ? ', published' : ''}, ${x.build.qualified} newly tracked`);
+      if (x.kalshi) parts.push(`Kalshi: ${x.kalshi.priced} lines priced, ${x.kalshi.moved} moved`);
+      if (x.grade) parts.push(`Graded ${x.grade.graded}`);
+      setMsg({ tone: x.errors?.length ? 'error' : 'success', text: [...parts, ...(x.errors ?? [])].join(' · ') || 'Nothing due.' });
+      onLoad?.();
     } catch (err) { setMsg({ tone: 'error', text: err.message }); }
     setBusy(false);
   }
   return (
     <section className="card flex flex-wrap items-center justify-between gap-4 p-5">
       <div className="text-sm">
-        <h2 className="font-semibold text-white">Live odds</h2>
+        <h2 className="font-semibold text-white">Automation</h2>
+        <p className="mt-1 text-muted">Boards build hourly from Kalshi ladders × nflverse hit rates, prices refresh on every visit (≤ every 90s), and games grade from nflverse finals.</p>
         {odds.enabled ? (
           <p className="mt-1 text-muted">
             Last run {odds.lastRunAt ? new Date(odds.lastRunAt).toLocaleString() : 'never'} ({odds.lastRunStatus ?? '—'})
             {odds.creditsRemaining != null && ` · ${odds.creditsRemaining} API credits left`}
           </p>
-        ) : <p className="mt-1 text-warn">ODDS_API_KEY isn't set — boards show posted prices only.</p>}
+        ) : null}
+        {!odds.draftkingsEnabled && <p className="mt-1 text-xs text-muted-dim">DraftKings re-pricing is off (no ODDS_API_KEY); pasted DK lines keep their posted price.</p>}
         {odds.lastError && <p className="mt-1 text-loss-text">{odds.lastError}</p>}
         {msg && <p className={`mt-1 ${msg.tone === 'error' ? 'text-loss-text' : 'text-win-text'}`}>{msg.text}</p>}
       </div>
-      <button type="button" className="btn-ghost" disabled={busy || !odds.enabled} onClick={refresh}>
-        {busy ? <Spinner className="h-4 w-4" /> : 'Refresh now'}
-      </button>
+      <div className="flex gap-2">
+        <button type="button" className="btn-ghost" disabled={busy} onClick={() => refresh(false)}>
+          {busy ? <Spinner className="h-4 w-4" /> : 'Refresh prices'}
+        </button>
+        <button type="button" className="btn-primary" disabled={busy} onClick={() => refresh(true)}>Build this week now</button>
+      </div>
     </section>
   );
 }

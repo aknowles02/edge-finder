@@ -163,3 +163,18 @@ update bets b set qualified_at = coalesce(bd.published_at, b.created_at), qualif
   from boards bd
  where bd.id = b.board_id and bd.status = 'published' and b.qualified_at is null
    and b.edge > 0 and b.odds between bd.odds_min and bd.odds_max;
+
+-- ── v3: automated boards (nflverse hit rates × Kalshi ladders) ───────────────────
+
+alter table bets add column if not exists venue text not null default 'draftkings'; -- draftkings | kalshi
+alter table bets add column if not exists external_ref text;   -- Kalshi market ticker
+alter table bets add column if not exists external_side text;  -- yes | no
+create unique index if not exists bets_external_key on bets (board_id, external_ref, external_side) where external_ref is not null;
+alter table games add column if not exists flags text;          -- e.g. starting-QB change warnings
+alter table boards add column if not exists source text not null default 'manual'; -- manual | auto
+
+create table if not exists pipeline_state (
+  key text primary key,
+  at  timestamptz not null default now(),
+  info jsonb
+);
