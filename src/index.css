@@ -32,3 +32,98 @@
 }
 
 input[type='range'] { accent-color: #1E6B45; }
+
+/* Edge slider: transparent track over the histogram, big thumb that's easy to grab on a phone. */
+.edge-range { -webkit-appearance: none; appearance: none; background: transparent; }
+.edge-range::-webkit-slider-runnable-track { height: 100%; background: transparent; }
+.edge-range::-moz-range-track { background: transparent; }
+.edge-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 26px; height: 26px; margin-top: calc(3.5rem - 26px);
+  border-radius: 9999px; background: #4CC98A; border: 4px solid #0F1419; box-shadow: 0 0 0 1px #4CC98A, 0 6px 18px rgba(30,107,69,.55);
+  transition: transform .15s cubic-bezier(.16,1,.3,1);
+}
+.edge-range::-moz-range-thumb {
+  width: 22px; height: 22px; border-radius: 9999px; background: #4CC98A; border: 4px solid #0F1419;
+  box-shadow: 0 0 0 1px #4CC98A, 0 6px 18px rgba(30,107,69,.55);
+}
+.edge-range:active::-webkit-slider-thumb { transform: scale(1.15); }
+.edge-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(76,201,138,.5); }
+
+/* ── Landing page motion & graphics ──────────────────────────────────────── */
+
+.hero-glow {
+  background:
+    radial-gradient(60% 55% at 78% 30%, rgba(30, 107, 69, 0.32), transparent 70%),
+    radial-gradient(40% 40% at 10% 0%, rgba(76, 201, 138, 0.08), transparent 70%);
+}
+.hero-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(70% 70% at 60% 30%, #000 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(70% 70% at 60% 30%, #000 30%, transparent 75%);
+}
+
+/* Real "live" state: the board is being re-priced. */
+.live-dot {
+  position: relative; display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #4CC98A; flex: none;
+}
+.live-dot::after {
+  content: ''; position: absolute; inset: -4px; border-radius: inherit; border: 2px solid #4CC98A; opacity: 0;
+}
+
+/* Locked rows: text is already masked server-side; blur makes it read as hidden data. */
+.redacted { filter: blur(5px); color: #9AA7B4; user-select: none; }
+.sample-row { background: linear-gradient(90deg, rgba(30, 107, 69, 0.18), rgba(30, 107, 69, 0.04)); box-shadow: inset 2px 0 0 #4CC98A; }
+
+.skeleton { background: linear-gradient(90deg, #18212A 0%, #222D38 50%, #18212A 100%); background-size: 200% 100%; }
+
+.steps-line { background: linear-gradient(90deg, #1E6B45, rgba(30, 107, 69, 0.15)); transform-origin: left; }
+.marquee-mask { mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); }
+.pro-card::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(70% 60% at 100% 0%, rgba(30, 107, 69, 0.28), transparent 70%);
+}
+.bar-fill { width: var(--w); }
+
+/* Shine sweep on the primary CTA. */
+.cta-shine::after {
+  content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.28) 48%, transparent 66%);
+  transform: translateX(-120%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ef-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  @keyframes ef-rise-big { from { opacity: 0; transform: translateY(32px) scale(0.98); } to { opacity: 1; transform: none; } }
+  @keyframes ef-row { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
+  @keyframes ef-ping { 0% { opacity: 0.8; transform: scale(0.6); } 100% { opacity: 0; transform: scale(1.8); } }
+  @keyframes ef-shine { 0%, 70% { transform: translateX(-120%); } 100% { transform: translateX(120%); } }
+  @keyframes ef-shimmer { to { background-position: -200% 0; } }
+  @keyframes ef-marquee { to { transform: translateX(-50%); } }
+  @keyframes ef-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+  .enter { opacity: 0; animation: ef-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) var(--d, 0ms) forwards; }
+  .enter-up { opacity: 0; animation: ef-rise-big 0.9s cubic-bezier(0.16, 1, 0.3, 1) var(--d, 0ms) forwards; }
+  .row-in { opacity: 0; animation: ef-row 0.5s cubic-bezier(0.16, 1, 0.3, 1) var(--d, 0ms) forwards; }
+  .live-dot::after { animation: ef-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite; }
+  .cta-shine::after { animation: ef-shine 3.6s ease-in-out 1.2s infinite; }
+  .skeleton { animation: ef-shimmer 1.4s linear infinite; }
+  .marquee { animation: ef-marquee 38s linear infinite; }
+  .marquee:hover { animation-play-state: paused; }
+  .board-card { animation: ef-float 7s ease-in-out 1.6s infinite; }
+  .board-card:hover { animation-play-state: paused; }
+
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1) var(--d, 0ms), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1) var(--d, 0ms); }
+  .reveal.is-in { opacity: 1; transform: none; }
+
+  /* The edge graphic: bars grow, then the gap bracket and label land. */
+  .gap-viz .bar-fill { width: 0; transition: width 1.1s cubic-bezier(0.16, 1, 0.3, 1) calc(var(--d, 0ms) + 200ms); }
+  .gap-viz.is-in .bar-fill { width: var(--w); }
+  .gap-viz .gap-bracket, .gap-viz .gap-label { opacity: 0; transition: opacity 0.5s ease 1.4s; }
+  .gap-viz.is-in .gap-bracket, .gap-viz.is-in .gap-label { opacity: 1; }
+
+  .steps-line { transform: scaleX(0); transition: transform 1.4s cubic-bezier(0.16, 1, 0.3, 1) 0.2s; }
+  #how:has(.reveal.is-in) .steps-line { transform: scaleX(1); }
+}

@@ -88,6 +88,17 @@ export default function Board() {
   const { board } = data;
   const history = board && !board.isCurrent;
 
+  // Everything except the edge threshold: feeds the slider's histogram and "N of M" count.
+  const base = useMemo(() => {
+    if (!board) return [];
+    let list = board.bets.filter((b) =>
+      (market === 'all' || marketGroup(b) === market) &&
+      (history || (b.odds >= oddsMin && b.odds <= oddsMax)) &&
+      (!hideSmall || b.sampleSize >= SMALL_SAMPLE));
+    if (bestOnly) list = bestPerSide(list);
+    return list;
+  }, [board, history, market, oddsMin, oddsMax, bestOnly, hideSmall]);
+
   const rows = useMemo(() => {
     if (!board) return [];
     let list = board.bets.filter((b) =>
@@ -143,15 +154,18 @@ export default function Board() {
           <StaleNotice board={board} odds={data.odds} />
           {history ? <HistoryStats rows={rows} /> : <SlateStats rows={rows} />}
 
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          {!history && (
+            <EdgeControl base={base} shown={rows.length} minEdge={minEdge} setMinEdge={setMinEdge} sort={sort} setSort={setSort} />
+          )}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <button type="button" className="btn-ghost py-2 text-xs" aria-expanded={showMore} onClick={() => setShowMore((v) => !v)}>
-              {showMore ? 'Hide filters' : 'More filters'}
+              {showMore ? 'Hide odds filter' : 'Odds window'}
             </button>
             <Toggle checked={bestOnly} onChange={setBestOnly} label="Best line per side" />
             <Toggle checked={hideSmall} onChange={setHideSmall} label={`Hide samples < ${SMALL_SAMPLE}`} />
           </div>
           {showMore && !history && (
-            <Filters {...{ minEdge, setMinEdge, oddsMin, setOddsMin, oddsMax, setOddsMax }} />
+            <Filters {...{ oddsMin, setOddsMin, oddsMax, setOddsMax }} />
           )}
 
           {rows.length === 0 ? (
@@ -265,13 +279,7 @@ function HistoryStats({ rows }) {
 function Filters(p) {
   const presetOn = (x) => p.oddsMin === x.min && p.oddsMax === x.max;
   return (
-    <section className="card mt-3 grid gap-5 p-4 sm:grid-cols-2" aria-label="More filters">
-      <div>
-        <label htmlFor="edge" className="label flex justify-between">
-          <span>Min edge</span><span className="normal-case tracking-normal text-win-text">≥ {p.minEdge.toFixed(1)}%</span>
-        </label>
-        <input id="edge" type="range" min="0" max="20" step="0.5" value={p.minEdge} onChange={(e) => p.setMinEdge(Number(e.target.value))} className="w-full" />
-      </div>
+    <section className="card mt-3 p-4" aria-label="Odds window">
       <div>
         <span className="label">Odds window</span>
         <div className="flex items-center gap-2">
@@ -524,4 +532,58 @@ function VenueTag({ venue }) {
   if (!venue) return null;
   const k = venue === 'kalshi';
   return <span className={`rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide ${k ? 'bg-[#1d3b5c] text-[#8cc4ff]' : 'bg-ink-700 text-muted'}`}>{k ? 'Kalshi' : 'DK'}</span>;
+}
+
+/**
+ * The edge slider: drag right to keep only the biggest edges. The histogram behind it is the real
+ * distribution of edges on this board, so you can see how many lines each notch removes.
+ */
+function EdgeControl({ base, shown, minEdge, setMinEdge, sort, setSort }) {
+  const edges = base.map((b) => b.edge * 100);
+  const max = Math.max(10, Math.ceil(Math.max(0, ...edges) / 5) * 5);
+  const bins = 40;
+  const counts = Array.from({ length: bins }, () => 0);
+  for (const e of edges) counts[Math.min(bins - 1, Math.max(0, Math.floor((e / max) * bins)))]++;
+  const peak = Math.max(1, ...counts);
+  const pctPos = (minEdge / max) * 100;
+  const desc = sort.key === 'edge' && sort.dir === 'desc';
+
+  return (
+    <section className="card mt-4 overflow-hidden p-4 sm:p-5" aria-label="Edge filter">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Minimum edge</div>
+          <div className="mt-0.5 flex items-baseline gap-2">
+            <span className="text-3xl font-extrabold tabular-nums text-win-text">{minEdge.toFixed(1)}%</span>
+            <span className="text-sm text-muted">showing <b className="text-white tabular-nums">{shown}</b> of {base.length}</span>
+          </div>
+        </div>
+        <div className="flex gap-1.5">
+          <button type="button" onClick={() => setSort({ key: 'edge', dir: desc ? 'asc' : 'desc' })}
+            className="chip-on inline-flex items-center gap-1.5" aria-label={`Sort by edge, ${desc ? 'highest' : 'lowest'} first`}>
+            Edge {desc ? 'high → low' : 'low → high'}
+            <span aria-hidden="true" className={`transition-transform duration-300 ${desc ? '' : 'rotate-180'}`}>↓</span>
+          </button>
+          {minEdge > 0 && <button type="button" className="chip-off" onClick={() => setMinEdge(0)}>Reset</button>}
+        </div>
+      </div>
+
+      <div className="relative mt-4 h-14">
+        <div className="absolute inset-x-0 bottom-3 flex h-10 items-end gap-px" aria-hidden="true">
+          {counts.map((c, i) => {
+            const on = ((i + 0.5) / bins) * max >= minEdge;
+            return (
+              <div key={i} className={`flex-1 rounded-t-sm transition-colors duration-200 ${on ? 'bg-win' : 'bg-ink-600/60'}`}
+                style={{ height: `${c ? Math.max(8, (c / peak) * 100) : 0}%` }} />
+            );
+          })}
+        </div>
+        <div className="absolute inset-x-0 bottom-3 h-px bg-ink-600" aria-hidden="true" />
+        <div className="pointer-events-none absolute bottom-0 top-0 w-px bg-win-text/70 transition-[left] duration-75" style={{ left: `${pctPos}%` }} aria-hidden="true" />
+        <input type="range" min="0" max={max} step="0.5" value={minEdge} aria-label="Minimum edge percent"
+          onChange={(e) => setMinEdge(Number(e.target.value))} className="edge-range absolute inset-x-0 bottom-0 h-14 w-full cursor-pointer focus-visible:ring-0 focus-visible:ring-offset-0" />
+      </div>
+      <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted-dim"><span>0%</span><span>{max / 2}%</span><span>{max}%+</span></div>
+    </section>
+  );
 }

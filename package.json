@@ -17,6 +17,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "@vercel/functions": "^2.2.13",
     "cookie-parser": "^1.4.7",
     "express": "^5.1.0",

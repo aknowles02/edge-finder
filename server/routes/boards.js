@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { summarizeTracked } from '../../shared/edge.js';
+import { bestPerSide, fairOdds, summarizeTracked } from '../../shared/edge.js';
+import { PROP_GROUPS, PROP_STATS } from '../../shared/props.js';
 import { SPORTS } from '../../shared/sports.js';
 import { can, canSport } from '../../shared/plans.js';
 import { query } from '../db.js';
@@ -32,6 +33,47 @@ router.get('/stats', async (_req, res) => {
   freshen();
   res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
   res.json({ record: await officialRecord() });
+});
+
+/**
+ * Public teaser of the live board for the landing page. Names are redacted HERE, server-side, so
+ * nothing can be un-blurred from the browser. One sample row is left open to show what's inside.
+ */
+const SAMPLE_RANK = 5;
+const mask = (text) => String(text).replace(/[A-Za-z0-9]/g, 'x');
+router.get('/preview', async (_req, res) => {
+  freshen();
+  const { rows: [row] } = await query(
+    `select * from boards where status = 'published' and kind = 'live' and sport = 'nfl' order by season desc, week desc limit 1`);
+  res.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+  if (!row) return res.json({ board: null });
+  const board = await loadBoard(row);
+  const official = bestPerSide(board.bets.filter((b) => b.odds >= row.odds_min && b.odds <= row.odds_max))
+    .sort((a, b) => b.edge - a.edge);
+  const group = (b) => (b.market === 'prop' ? PROP_GROUPS[PROP_STATS[b.propKey]?.group] ?? 'Props' : b.market === 'spread' ? 'Alt spread' : 'Alt total');
+  const lastMove = board.bets.reduce((m, b) => (b.lineMovedAt && (!m || b.lineMovedAt > m) ? b.lineMovedAt : m), null);
+  res.json({
+    board: {
+      season: board.season, week: board.week,
+      opportunities: official.length,
+      games: new Set(official.map((b) => b.game)).size,
+      topEdge: official[0]?.edge ?? null,
+      avgEdge: official.length ? official.reduce((t, b) => t + b.edge, 0) / official.length : null,
+      markets: new Set(official.map(group)).size,
+      lastMove,
+      rows: official.slice(0, 10).map((b, i, top) => {
+        // Open one believable row (sub-97% hit rate), preferring rank 5.
+        const sampleIdx = [SAMPLE_RANK - 1, ...top.keys()].find((k) => top[k] && top[k].blended < 0.97) ?? SAMPLE_RANK - 1;
+        const open = i === sampleIdx;
+        return {
+          rank: i + 1, locked: !open, market: group(b), venue: b.venue,
+          game: open ? b.game : mask(b.game),
+          bet: open ? `${b.selection}${b.line != null ? ` ${b.market === 'spread' && b.line > 0 ? '+' : ''}${b.line}` : ''}` : mask(b.selection).slice(0, 18),
+          odds: b.odds, prob: b.blended, fair: fairOdds(b.blended), edge: b.edge, n: b.sampleSize,
+        };
+      }),
+    },
+  });
 });
 
 router.get('/sports', (_req, res) => {
