@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build",
+  "buildCommand": "node scripts/migrate.js && npm run build",
   "outputDirectory": "dist",
   "functions": {
     "api/index.js": { "maxDuration": 30, "includeFiles": "{server,shared}/**" }
