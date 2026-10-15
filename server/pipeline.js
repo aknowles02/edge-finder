@@ -7,8 +7,10 @@
 
 import { blendHitRate, gradeBet, impliedProbability } from '../shared/edge.js';
 import { qbChangeFlag, spreadHitRate, teamLogs, totalHitRate } from '../shared/hitrates.js';
+import { MIN_GAMES, gradeProp, nameKey, playerHitRate } from '../shared/props.js';
+import { indexByPlayer, loadPlayerStats } from './playerstats.js';
 import { query, tx } from './db.js';
-import { betsFromEntry, costToAmerican, effectiveCost, fetchAllLadders, teamsMatch } from './kalshi.js';
+import { betsFromEntry, costToAmerican, effectiveCost, fetchAllLadders, propTeam, teamsMatch } from './kalshi.js';
 import { currentWeek, loadGames } from './nflverse.js';
 import { qualifyBets } from './boards.js';
 import { refreshDraftKings } from './odds.js';
@@ -28,7 +30,7 @@ const mark = (key, info) => query(
    on conflict (key) do update set at = now(), info = excluded.info`, [key, info ?? null]);
 
 /** Pure scoring: every Kalshi rung for the week's open games, with nflverse hit rates. No I/O. */
-export function scoreWeek({ games, ladders, week, now = Date.now() }) {
+export function scoreWeek({ games, ladders, week, players, now = Date.now() }) {
   const weekGames = games.filter((g) => g.season === SEASON && g.type === 'REG' && g.week === week);
   const firstDay = weekGames.map((g) => g.gameday).sort()[0];
   const logs25 = teamLogs(games, SEASON - 1);
@@ -46,17 +48,30 @@ export function scoreWeek({ games, ladders, week, now = Date.now() }) {
     gameRows.push({ label, away: g.away, home: g.home, kickoff: g.kickoff, event: entries[0].eventTicker, flags });
 
     for (const e of entries) {
+      if (e.kind === 'prop' && (!players || !propTeam(e, g.away, g.home))) continue;
       for (const b of betsFromEntry(e, g.away, g.home)) {
         const odds = costToAmerican(effectiveCost(b.ask));
         if (odds == null || odds < STORE_MIN || odds > STORE_MAX) continue;
-        const opp = b.selection === g.away ? g.home : g.away;
-        const r25 = b.market === 'spread' ? spreadHitRate(logs25, b.selection, opp, b.line) : totalHitRate(logs25, g.away, g.home, b.line, b.selection);
-        const r26 = b.market === 'spread' ? spreadHitRate(logs26, b.selection, opp, b.line) : totalHitRate(logs26, g.away, g.home, b.line, b.selection);
+        let r25, r26;
+        if (b.market === 'prop') {
+          const key = nameKey(b.player);
+          r25 = playerHitRate(players.s25.get(key) ?? [], b.propKey, b.line, b.propSide);
+          r26 = playerHitRate(players.s26.get(key) ?? [], b.propKey, b.line, b.propSide);
+          if (r25.n + r26.n < MIN_GAMES) continue; // same bar as the original QB rule: 6+ real games
+        } else if (b.market === 'spread') {
+          const opp = b.selection === g.away ? g.home : g.away;
+          r25 = spreadHitRate(logs25, b.selection, opp, b.line);
+          r26 = spreadHitRate(logs26, b.selection, opp, b.line);
+        } else {
+          r25 = totalHitRate(logs25, g.away, g.home, b.line, b.selection);
+          r26 = totalHitRate(logs26, g.away, g.home, b.line, b.selection);
+        }
         const blended = blendHitRate(r25.rate, r25.n, r26.rate, r26.n);
         if (blended == null) continue;
         const implied = impliedProbability(odds);
         rows.push({
           label, market: b.market, selection: b.selection, line: b.line, odds, ref: b.ref, side: b.side,
+          propKey: b.propKey ?? null, player: b.player ?? null, propSide: b.propSide ?? null,
           h25: r25.rate, n25: r25.n, h26: r26.rate, n26: r26.n, blended, implied, edge: blended - implied,
           sample: r25.n + r26.n,
         });
@@ -67,12 +82,18 @@ export function scoreWeek({ games, ladders, week, now = Date.now() }) {
 }
 
 /** Build (or extend) the board for the current week. Never removes or re-prices locked records. */
-export async function buildWeek({ week, ladders, games } = {}) {
+export async function loadPlayers(week) {
+  const [s25, s26] = await Promise.all([loadPlayerStats(SEASON - 1), loadPlayerStats(SEASON)]);
+  return { s25: indexByPlayer(s25), s26: indexByPlayer(s26, { beforeWeek: week }) };
+}
+
+export async function buildWeek({ week, ladders, games, players } = {}) {
   games ??= await loadGames();
   week ??= currentWeek(games, SEASON);
   if (!week) return { skipped: 'no upcoming regular-season week' };
   ladders ??= await fetchAllLadders();
-  const { gameRows, rows } = scoreWeek({ games, ladders, week });
+  players ??= await loadPlayers(week).catch((err) => { console.error('[players]', err); return null; });
+  const { gameRows, rows } = scoreWeek({ games, ladders, week, players });
   if (!gameRows.length) return { week, games: 0, bets: 0, note: 'Kalshi has no ladders posted for this week yet' };
 
   const result = await tx(async (db) => {
@@ -93,11 +114,13 @@ export async function buildWeek({ week, ladders, games } = {}) {
     const { rowCount } = await db.query(
       `insert into bets (board_id, game_id, venue, external_ref, external_side, market, selection, line, odds,
                          hit_2025, n_2025, hit_2026, n_2026, blended, implied, edge, sample_size,
-                         line_status, odds_updated_at)
+                         line_status, odds_updated_at, prop_key, player, prop_side)
        select $1, g.id, 'kalshi', x.ref, x.side, x.market, x.selection, x.line, x.odds,
-              x.h25, x.n25, x.h26, x.n26, x.blended, x.implied, x.edge, x.sample, 'live', now()
+              x.h25, x.n25, x.h26, x.n26, x.blended, x.implied, x.edge, x.sample, 'live', now(),
+              x."propKey", x.player, x."propSide"
          from jsonb_to_recordset($2::jsonb) as x(label text, market text, selection text, line numeric, odds int, ref text, side text,
-                h25 numeric, n25 int, h26 numeric, n26 int, blended numeric, implied numeric, edge numeric, sample int)
+                h25 numeric, n25 int, h26 numeric, n26 int, blended numeric, implied numeric, edge numeric, sample int,
+                "propKey" text, player text, "propSide" text)
          join games g on g.board_id = $1 and g.label = x.label
        on conflict (board_id, external_ref, external_side) where external_ref is not null do update
          set hit_2025 = excluded.hit_2025, n_2025 = excluded.n_2025, hit_2026 = excluded.hit_2026, n_2026 = excluded.n_2026,
@@ -172,7 +195,38 @@ async function lockAndQualify() {
   return n;
 }
 
-/** Grade finished games on live boards from nflverse scores. Props stay manual. */
+/** Grade automated props from nflverse player stats once the game's week is in the file (usually within a day). */
+export async function gradeProps() {
+  const { rows: pending } = await query(
+    `select b.id, b.player, b.prop_key, b.prop_side, b.line, bd.season, bd.week
+       from bets b join boards bd on bd.id = b.board_id join games g on g.id = b.game_id
+      where bd.kind = 'live' and b.market = 'prop' and b.prop_key is not null and b.result is null
+        and g.away_score is not null`,
+  );
+  if (!pending.length) return { graded: 0 };
+  const seasons = [...new Set(pending.map((p) => p.season))];
+  const stats = new Map();
+  for (const season of seasons) stats.set(season, await loadPlayerStats(season, { fresh: true }));
+  const updates = [];
+  for (const p of pending) {
+    const rows = stats.get(p.season);
+    if (!rows.some((r) => r.week === p.week)) continue; // stats for that week not published yet
+    const row = rows.find((r) => r.week === p.week && r.key === nameKey(p.player));
+    // No row = didn't record a stat (inactive/DNP). Leave for manual review rather than guess Kalshi's ruling.
+    const result = gradeProp(row, p.prop_key, Number(p.line), p.prop_side);
+    if (result) updates.push({ id: p.id, result });
+  }
+  if (updates.length) {
+    await query(
+      `update bets b set result = x.result, graded_at = now()
+         from jsonb_to_recordset($1::jsonb) as x(id bigint, result text) where b.id = x.id`,
+      [JSON.stringify(updates)],
+    );
+  }
+  return { graded: updates.length };
+}
+
+/** Grade finished games on live boards from nflverse scores (spreads/totals). */
 export async function gradeFromNflverse({ games } = {}) {
   const { rows: pending } = await query(
     `select g.*, bd.season, bd.week from games g join boards bd on bd.id = g.board_id
@@ -236,7 +290,13 @@ export async function runPipeline({ force = false, build = false } = {}) {
   if (process.env.ODDS_API_KEY) await step('draftkings', () => refreshDraftKings({ force }));
   await step('qualify', lockAndQualify);
   if (force || await due('grade', 30)) {
-    await step('grade', async () => { const r = await gradeFromNflverse({ games: null }); await mark('grade', r); return r; });
+    await step('grade', async () => {
+      const r = await gradeFromNflverse({ games: null });
+      const p = await gradeProps();
+      const out = { graded: r.graded, propsGraded: p.graded };
+      await mark('grade', out);
+      return out;
+    });
   }
 
   const priced = (summary.kalshi?.priced ?? 0) + (summary.draftkings?.games ?? 0);

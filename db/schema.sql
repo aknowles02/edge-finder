@@ -178,3 +178,8 @@ create table if not exists pipeline_state (
   at  timestamptz not null default now(),
   info jsonb
 );
+
+-- ── v4: automated player props ───────────────────────────────────────────────────
+alter table bets add column if not exists prop_key text;   -- shared/props.js key, e.g. pass_yds
+alter table bets add column if not exists player text;     -- player display name (props only)
+alter table bets add column if not exists prop_side text;  -- Over | Under

@@ -4,6 +4,7 @@ import {
   SMALL_SAMPLE, betLabel, bestPerSide, closingLineValue, fairOdds, formatOdds, summarizeTracked,
 } from '../../shared/edge.js';
 import { api, kickoff, pct, signedPct, timeAgo, units } from '../lib/api.js';
+import { PROP_GROUPS, PROP_STATS } from '../../shared/props.js';
 import { useAuth } from '../lib/auth.jsx';
 import { Alert, LockIcon, ResultBadge, Spinner } from '../components/ui.jsx';
 
@@ -11,8 +12,11 @@ const MARKETS = [
   { id: 'all', label: 'All markets' },
   { id: 'spread', label: 'Spreads' },
   { id: 'total', label: 'Totals' },
-  { id: 'prop', label: 'Props' },
+  ...Object.entries(PROP_GROUPS).map(([id, label]) => ({ id, label })),
 ];
+// Pasted props from before automation have no prop key; they were QB passing props.
+const marketGroup = (b) => (b.market === 'prop' ? PROP_STATS[b.propKey]?.group ?? 'passing' : b.market);
+const marketName = (b) => (b.market === 'prop' ? (PROP_STATS[b.propKey] ? `${PROP_GROUPS[PROP_STATS[b.propKey].group]} prop` : 'QB prop') : MARKET_NAME[b.market]);
 const ODDS_PRESETS = [
   { label: '−200 to −500', min: -500, max: -200 },
   { label: '−200 to −1000', min: -1000, max: -200 },
@@ -87,7 +91,7 @@ export default function Board() {
   const rows = useMemo(() => {
     if (!board) return [];
     let list = board.bets.filter((b) =>
-      (market === 'all' || b.market === market) &&
+      (market === 'all' || marketGroup(b) === market) &&
       (history || b.edge * 100 >= minEdge) &&
       (history || (b.odds >= oddsMin && b.odds <= oddsMax)) &&
       (!hideSmall || b.sampleSize >= SMALL_SAMPLE));
@@ -421,7 +425,7 @@ function BetTable({ rows, sort, onSort, history }) {
                     {b.flags && <div className="max-w-[180px] whitespace-normal text-[11px] text-warn" title={b.flags}>⚠ QB change</div>}
                   </td>
                   <td className="px-3 py-3">
-                    <div className="flex items-center gap-1.5 text-[11px] text-muted">{MARKET_NAME[b.market]} <VenueTag venue={b.venue} /></div>
+                    <div className="flex items-center gap-1.5 text-[11px] text-muted">{marketName(b)} <VenueTag venue={b.venue} /></div>
                     <div className="whitespace-nowrap font-semibold text-white">{betLabel(b)}</div>
                   </td>
                   <td className="px-3 py-3 text-right"><OddsCell bet={b} history={history} /></td>
@@ -458,7 +462,7 @@ function BetCards({ rows, history }) {
               <div className="min-w-0">
                 <div className="text-[11px] text-muted">#{i + 1} · {b.game}{b.commenceTime && !b.started ? ` · ${kickoff(b.commenceTime)}` : ''}</div>
                 <div className="mt-0.5 font-semibold text-white">{betLabel(b)}</div>
-                <div className="flex items-center gap-1.5 text-[11px] text-muted-dim">{MARKET_NAME[b.market]} <VenueTag venue={b.venue} /></div>
+                <div className="flex items-center gap-1.5 text-[11px] text-muted-dim">{marketName(b)} <VenueTag venue={b.venue} /></div>
                 {b.flags && <div className="text-[11px] text-warn">⚠ {b.flags}</div>}
               </div>
               <div className="text-right">
@@ -491,7 +495,7 @@ function Methodology({ history }) {
     <details className="mt-5 text-xs leading-relaxed text-muted-dim">
       <summary className="cursor-pointer font-medium text-muted">How these numbers are calculated</summary>
       <div className="mt-2 space-y-1.5">
-        <p><b className="text-muted">Est. prob</b> is a historical hit rate: 75% from the full 2025 season, 25% from 2026 to date (props: QB games with 15+ attempts). It is an estimate, not a guarantee. <span className="text-warn">●</span> flags samples under {SMALL_SAMPLE} games.</p>
+        <p><b className="text-muted">Est. prob</b> is a historical hit rate: 75% from the full 2025 season, 25% from 2026 to date. Spreads pool both teams' games from the right side; totals pool both teams' games. Player props count only games where the player had a real role (QBs: 15+ attempts; runners: a carry; receivers: a target) and need 6+ such games. It is an estimate, not a guarantee. <span className="text-warn">●</span> flags samples under {SMALL_SAMPLE} games.</p>
         <p><b className="text-muted">Fair odds</b> converts that probability to American odds. <b className="text-muted">Edge</b> = est. prob − the price's implied probability (|odds| ÷ (|odds| + 100)).</p>
         <p>Lines on the same side of a game are correlated; “Best line per side” keeps just one.</p>
         <p><b className="text-muted">Kalshi</b> prices are the current ask converted to American odds, with Kalshi's taker fee (0.07 × P × (1 − P)) included, so the edge is what you'd actually get. ⚠ marks games where a team's latest starting QB differs from its usual starter — the history may not reflect who's playing.</p>

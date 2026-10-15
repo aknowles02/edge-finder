@@ -42,7 +42,7 @@ export default function Reports() {
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <Breakdown title="By week" rows={r.byWeek} label={(x) => `${x.sport.toUpperCase()} ${x.season} · Wk ${x.week}`} />
-        <Breakdown title="By market" rows={r.byMarket} label={(x) => ({ spread: 'Alt spreads', total: 'Alt totals', prop: 'QB props' }[x.market] ?? x.market)} />
+        <Breakdown title="By market" rows={r.byMarket} label={(x) => ({ spread: 'Alt spreads', total: 'Alt totals', prop: 'Player props' }[x.market] ?? x.market)} />
       </div>
 
       {!isBacktest && <Opportunities list={data.opportunities} />}

@@ -30,6 +30,7 @@ function toBet(r) {
     blended: r.blended, implied: r.implied, edge: r.edge, sampleSize: r.sample_size,
     oddsUpdatedAt: r.odds_updated_at ?? r.created_at, lineMovedAt: r.line_moved_at,
     lineStatus: r.line_status, liveTracked: s.tracked, stale: s.stale, venue: r.venue, flags: r.flags,
+    propKey: r.prop_key, player: r.player,
     qualifiedAt: r.qualified_at, qualifiedOdds: r.qualified_odds, qualifiedProb: r.qualified_prob, qualifiedEdge: r.qualified_edge,
     closingOdds: r.closing_odds, result: r.result,
   };

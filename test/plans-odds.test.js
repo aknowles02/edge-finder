@@ -85,3 +85,29 @@ test('Eastern kickoff converts to UTC across DST', () => {
   assert.equal(easternToUtc('2026-10-18', '13:00'), '2026-10-18T17:00:00.000Z');
   assert.equal(easternToUtc('2026-12-06', '13:00'), '2026-12-06T18:00:00.000Z');
 });
+
+import { PROP_STATS, gradeProp, nameKey, playerHitRate, propSelection } from '../shared/props.js';
+import { propTeam } from '../server/kalshi.js';
+
+test('player prop hit rates use role games only, same Over/Under logic', () => {
+  const rows = [
+    { attempts: 30, passing_yards: 260 }, { attempts: 35, passing_yards: 310 },
+    { attempts: 5, passing_yards: 20 }, // garbage-time cameo: excluded
+  ];
+  const r = playerHitRate(rows, 'pass_yds', 249.5, 'Over');
+  assert.equal(r.n, 2);
+  assert.equal(r.rate, 1);
+  assert.equal(playerHitRate(rows, 'pass_yds', 299.5, 'Under').rate, 0.5);
+  assert.equal(gradeProp({ attempts: 30, passing_yards: 300 }, 'pass_yds', 299.5, 'Over'), 'W');
+  assert.equal(gradeProp(null, 'pass_yds', 299.5, 'Over'), null);
+  assert.equal(PROP_STATS.any_td.value({ rushing_tds: 1, receiving_tds: 1 }), 2);
+});
+
+test('prop names and team tags', () => {
+  assert.equal(nameKey('A.J. Brown'), nameKey('AJ Brown'));
+  assert.equal(nameKey('Patrick Mahomes II'), 'patrick mahomes');
+  assert.equal(propSelection('Tanner McKee', 'pass_yds', 'Over'), 'Tanner McKee Pass Yds Over');
+  assert.equal(propTeam({ playerTag: 'PHITMCKEE16' }, 'CAR', 'PHI'), 'PHI');
+  assert.equal(propTeam({ playerTag: 'NOKMILLER5' }, 'NO', 'NYG'), 'NO');
+  assert.equal(propTeam({ playerTag: 'JACTETIENNE1' }, 'HOU', 'JAX'), 'JAX');
+});

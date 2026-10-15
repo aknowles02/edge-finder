@@ -43,10 +43,12 @@ Defined once in `shared/plans.js` (the API enforces them, the UI renders copy fr
 
 `server/pipeline.js` runs on page views (throttled to once per 90s), Vercel Cron, the admin button, or `GET /api/tick` (point any free uptime pinger at it). Each run:
 
-1. **Builds this week's board** (hourly) — every Kalshi alt spread/total rung (`KXNFLSPREAD`, `KXNFLTOTAL`, public API, no key) for the week's open games, scored with nflverse hit rates: spreads pool both teams' logs from the right side, totals pool both teams' games, blended 75% 2025 / 25% 2026-to-date. Lines from −150 to −1000 are stored; the board window (−200 to −500) decides what qualifies. Auto-publishes unless `AUTO_PUBLISH_BOARDS=0`.
+1. **Builds this week's board** (hourly) — every Kalshi alt spread/total rung and player-prop rung (`KXNFLSPREAD`, `KXNFLTOTAL`, public API, no key) for the week's open games, scored with nflverse hit rates: spreads pool both teams' logs from the right side, totals pool both teams' games, blended 75% 2025 / 25% 2026-to-date. Lines from −150 to −1000 are stored; the board window (−200 to −500) decides what qualifies. Auto-publishes unless `AUTO_PUBLISH_BOARDS=0`.
 2. **Re-prices** every open Kalshi line (ask + Kalshi's taker fee → American odds), logs moves, flags pulled lines.
 3. **Locks closing prices** at kickoff and **qualifies** newly positive-edge lines.
-4. **Grades** finished games from nflverse finals (every 30 min). Props stay manual.
+4. **Grades** finished games from nflverse finals (every 30 min), and player props from nflverse weekly player stats once that week is published (usually within a day). A player with no stat row (inactive) is left for manual review.
+
+**Player props** (all of Kalshi's per-game NFL player ladders): passing yards / TDs / attempts / completions / INTs, rushing yards / attempts, receiving yards, receptions, rush+rec yards, and anytime TDs (`shared/props.js`). Hit rates use the same 75/25 blend and only count games where the player had a real role (QB 15+ attempts, a carry, or a target); players need 6+ such games.
 
 Games where a team's latest starting QB differs from its usual starter are flagged ⚠. Dry-run with live data and no database: `node scripts/preview-week.js [week]`.
 

@@ -5,9 +5,15 @@
 // Every market is two bets: YES and NO.
 
 import { canonTeam } from '../shared/hitrates.js';
+import { PROP_STATS, propSelection } from '../shared/props.js';
 
 const API = 'https://api.elections.kalshi.com/trade-api/v2';
-export const KALSHI_SERIES = { spread: 'KXNFLSPREAD', total: 'KXNFLTOTAL' };
+export const KALSHI_SERIES = {
+  spread: 'KXNFLSPREAD',
+  total: 'KXNFLTOTAL',
+  // Player props: "Tanner McKee: 300+ passing yards" (floor_strike 299.5), one series per stat.
+  ...Object.fromEntries(Object.entries(PROP_STATS).map(([k, d]) => [`prop:${k}`, d.series])),
+};
 
 // Kalshi's taker fee is 0.07 × P × (1 − P) per contract (rounded up per order). We fold it into the price
 // so edge and ROI reflect what you actually pay.
@@ -43,6 +49,19 @@ function toLadderEntry(m, kind) {
   const ev = parseEventTicker(m.event_ticker);
   if (!ev || m.floor_strike == null) return null;
   const suffix = m.ticker.slice(m.event_ticker.length + 1);
+  if (kind.startsWith('prop:')) {
+    // Suffix looks like "PHITMCKEE16-300": team code + player tag; title subtitle carries the full name.
+    const player = String(m.yes_sub_title || m.title || '').split(':')[0].trim();
+    if (!player) return null;
+    return {
+      ticker: m.ticker, eventTicker: m.event_ticker, date: ev.date, teams: ev.teams,
+      kind: 'prop', propKey: kind.slice(5), player, playerTag: suffix.split('-')[0],
+      strike: Number(m.floor_strike),
+      yesAsk: dollars(m.yes_ask_dollars), noAsk: dollars(m.no_ask_dollars),
+      yesBid: dollars(m.yes_bid_dollars), noBid: dollars(m.no_bid_dollars),
+      volume: dollars(m.volume_fp) ?? 0, closeTime: m.close_time,
+    };
+  }
   return {
     ticker: m.ticker,
     eventTicker: m.event_ticker,
@@ -84,8 +103,18 @@ export async function fetchLadder(kind) {
 }
 
 export async function fetchAllLadders() {
-  const [spreads, totals] = await Promise.all([fetchLadder('spread'), fetchLadder('total')]);
-  return [...spreads, ...totals];
+  const all = await Promise.all(Object.keys(KALSHI_SERIES).map((k) => fetchLadder(k)));
+  return all.flat();
+}
+
+/** Which of the game's two teams a player market belongs to, from its ticker tag ("PHITMCKEE16"). */
+export function propTeam(entry, away, home) {
+  const codes = (t) => [t, ...Object.entries({ JAC: 'JAX', LA: 'LAR', WSH: 'WAS' }).filter(([, v]) => v === t).map(([k]) => k)];
+  const tag = entry.playerTag ?? '';
+  const match = (t) => codes(t).some((c) => tag.startsWith(c));
+  // Prefer the longer code first so "NYG…" isn't read as "NY…".
+  const [a, b] = away.length >= home.length ? [away, home] : [home, away];
+  return match(a) ? a : match(b) ? b : null;
 }
 
 /**
@@ -103,6 +132,10 @@ export function betsFromEntry(e, away, home) {
     if (!opp) return [];
     push('yes', e.yesAsk, e.yesBid, e.team, -e.strike, 'spread');
     push('no', e.noAsk, e.noBid, opp, e.strike, 'spread');
+  } else if (e.kind === 'prop') {
+    push('yes', e.yesAsk, e.yesBid, propSelection(e.player, e.propKey, 'Over'), e.strike, 'prop');
+    push('no', e.noAsk, e.noBid, propSelection(e.player, e.propKey, 'Under'), e.strike, 'prop');
+    for (const x of sides) Object.assign(x, { propKey: e.propKey, player: e.player, propSide: x.side === 'yes' ? 'Over' : 'Under' });
   } else {
     push('yes', e.yesAsk, e.yesBid, 'Over', e.strike, 'total');
     push('no', e.noAsk, e.noBid, 'Under', e.strike, 'total');
