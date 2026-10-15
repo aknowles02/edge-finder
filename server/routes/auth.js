@@ -41,6 +41,7 @@ router.post('/auth/login', loginLimiter, async (req, res) => {
 router.post('/auth/verify', async (req, res) => {
   const token = String(req.body?.token ?? '');
   if (!token) throw new HttpError(400, 'Missing token');
+  config.sessionSecret(); // fail before burning the single-use token
   const { rows } = await query(
     `update login_tokens set used_at = now()
       where token_hash = $1 and used_at is null and expires_at > now()

@@ -1,8 +1,11 @@
 const env = process.env;
 
+// Config errors name the variable (never its value) so a broken deploy says what to fix.
+const misconfigured = (msg) => Object.assign(new Error(`Server misconfigured: ${msg}`), { status: 500, expose: true });
+
 function required(name) {
   const v = env[name];
-  if (!v) throw Object.assign(new Error(`Server misconfigured: ${name} is not set`), { status: 500, expose: false });
+  if (!v) throw misconfigured(`${name} is not set`);
   return v;
 }
 
@@ -12,7 +15,7 @@ export const config = {
   databaseUrl: () => required('DATABASE_URL'),
   sessionSecret: () => {
     const s = required('SESSION_SECRET');
-    if (s.length < 32) throw new Error('SESSION_SECRET must be at least 32 characters');
+    if (s.length < 32) throw misconfigured(`SESSION_SECRET must be at least 32 characters (it is ${s.length})`);
     return s;
   },
   adminEmails: () => new Set((env.ADMIN_EMAILS || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)),
