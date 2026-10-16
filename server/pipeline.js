@@ -244,12 +244,13 @@ export async function refreshBooks({ ladders, games, force = false } = {}) {
       where bd.kind = 'live' and bd.status = 'published' and g.away_score is null
         and g.commence_time > now()`,
   );
-  const out = { games: open.length, kalshi: 0, sportsbooks: 0, moved: 0, credits: null, skipped: 0 };
+  const out = { games: open.length, kalshi: 0, sportsbooks: 0, moved: 0, credits: null, skipped: 0,
+    keyConfigured: Boolean(process.env.ODDS_API_KEY), noKalshi: 0, notDue: 0, unmatched: 0, fetched: 0 };
   let events = null;
   for (const g of open) {
     const kalshi = ladders.filter((e) => teamsMatch(e.teams, g.away, g.home)
       && Math.abs(new Date(e.date) - new Date(g.commence_time)) <= 1.5 * 86_400_000);
-    if (!kalshi.length) continue;
+    if (!kalshi.length) { out.noKalshi++; continue; }
     if (process.env.KALSHI_AS_BOOK === '1') { // research only; see shared/books.js
       const k = await upsertBookLines(g, scoreKalshiAsBook(kalshi, g, models));
       out.kalshi += k.stored; out.moved += k.moved;
@@ -258,12 +259,13 @@ export async function refreshBooks({ ladders, games, force = false } = {}) {
     if (!process.env.ODDS_API_KEY) continue;
     const kickoff = new Date(g.commence_time).getTime();
     const due = force || !g.book_checked_at || Date.now() - new Date(g.book_checked_at).getTime() >= bookCadenceMs(kickoff) - 60_000;
-    if (!due) continue;
+    if (!due) { out.notDue++; continue; }
     if (out.credits != null && out.credits < RESERVE_CREDITS) { out.skipped++; continue; }
     events ??= await listEvents(g.sport);
     const ev = (g.odds_event_id && events.find((e) => e.id === g.odds_event_id)) || matchEvent(g.sport, g, events);
-    if (!ev) continue;
+    if (!ev) { out.unmatched++; continue; }
     const { data, remaining } = await fetchEventOdds(ev.id, g.sport);
+    out.fetched++;
     out.credits = remaining ?? out.credits;
     await query('update games set odds_event_id = $1, book_checked_at = now() where id = $2', [ev.id, g.id]);
     if (!data) continue;
@@ -377,7 +379,9 @@ export async function runPipeline({ force = false, build = false } = {}) {
     await step('build', async () => { const r = await buildWeek({ ladders, games }); await mark(BUILD_KEY, r); return r; });
   }
   if (ladders) await step('kalshi', () => refreshKalshi({ ladders }));
-  if (ladders && games) await step('books', () => refreshBooks({ ladders, games, force }));
+  if (ladders && games) {
+    await step('books', async () => { const r = await refreshBooks({ ladders, games, force }); await mark('books', r); return r; });
+  }
   // Legacy: re-pricing pasted DraftKings lines. The book step above covers sportsbooks now.
   if (process.env.ODDS_API_KEY && process.env.EDGE_MODEL === 'hitrate') await step('draftkings', () => refreshDraftKings({ force }));
   await step('qualify', lockAndQualify);

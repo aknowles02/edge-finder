@@ -122,7 +122,8 @@ async function oddsApi(path, params) {
   for (const [k, v] of Object.entries(params ?? {})) url.searchParams.set(k, v);
   const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   const remaining = res.headers.get('x-requests-remaining');
-  if (res.status === 422 || res.status === 404) return { data: null, remaining: remaining == null ? null : Number(remaining) };
+  if (res.status === 404) return { data: null, remaining: remaining == null ? null : Number(remaining) };
+  if (res.status === 422) throw new Error(`Odds API rejected the request (422): ${(await res.text()).slice(0, 200)}`);
   if (!res.ok) throw new Error(`Odds API ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return { data: await res.json(), remaining: remaining == null ? null : Number(remaining) };
 }

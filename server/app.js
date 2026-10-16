@@ -27,7 +27,11 @@ app.get('/api/tick', async (_req, res) => {
   const { oddsStatus } = await import('./odds.js');
   await freshen({ waitMs: 25_000 });
   const s = await oddsStatus();
-  res.set('Cache-Control', 'no-store').json({ ok: true, lastRunAt: s.lastRunAt, lastRunStatus: s.lastRunStatus, lastSuccessAt: s.lastSuccessAt, lastError: s.lastError });
+  const { query } = await import('./db.js');
+  const { rows: [b] } = await query(`select at, info from pipeline_state where key = 'books'`).catch(() => ({ rows: [] }));
+  // Counts only (no prices or picks): enough to see whether sportsbook pulls are working.
+  res.set('Cache-Control', 'no-store').json({ ok: true, lastRunAt: s.lastRunAt, lastRunStatus: s.lastRunStatus,
+    lastSuccessAt: s.lastSuccessAt, lastError: s.lastError, books: b ? { at: b.at, ...b.info } : null });
 });
 app.use('/api', authRoutes, boardRoutes, billingRoutes, adminRoutes, cronRoutes);
 
