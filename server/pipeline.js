@@ -407,6 +407,32 @@ export async function gradeProps() {
   return { graded: updates.length };
 }
 
+/**
+ * Personal bets: copy the result and sharp closing price from the board line they came from, or grade
+ * manual spreads/totals on a known game from its final score. Manual props stay user-graded.
+ */
+export async function gradeUserBets() {
+  const { rowCount: linked } = await query(
+    `update user_bets ub set result = b.result, graded_at = now(), closing_fair = coalesce(ub.closing_fair, b.closing_fair)
+       from bets b where b.id = ub.bet_id and ub.result is null and b.result is not null`);
+  await query(
+    `update user_bets ub set closing_fair = b.closing_fair from bets b
+      where b.id = ub.bet_id and ub.closing_fair is null and b.closing_fair is not null`);
+  const { rows } = await query(
+    `select ub.id, ub.market, ub.selection, ub.line, g.away, g.home, g.away_score, g.home_score
+       from user_bets ub join games g on g.id = ub.game_id
+      where ub.result is null and ub.bet_id is null and ub.market <> 'prop' and g.away_score is not null`);
+  let manual = 0;
+  for (const r of rows) {
+    const result = gradeBet({ market: r.market, selection: r.selection, line: r.line },
+      { away: r.away, home: r.home, awayScore: r.away_score, homeScore: r.home_score });
+    if (!result) continue;
+    await query('update user_bets set result = $1, graded_at = now() where id = $2', [result, r.id]);
+    manual++;
+  }
+  return linked + manual;
+}
+
 /** Grade finished games on live boards from nflverse scores (spreads/totals). */
 export async function gradeFromNflverse({ games } = {}) {
   const { rows: pending } = await query(
@@ -478,7 +504,8 @@ export async function runPipeline({ force = false, build = false } = {}) {
     await step('grade', async () => {
       const r = await gradeFromNflverse({ games: null });
       const p = await gradeProps();
-      const out = { graded: r.graded, propsGraded: p.graded };
+      const u = await gradeUserBets();
+      const out = { graded: r.graded, propsGraded: p.graded, userBetsGraded: u };
       await mark('grade', out);
       return out;
     });

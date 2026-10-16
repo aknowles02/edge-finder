@@ -210,3 +210,24 @@ alter table bets add column if not exists edge_last_seen timestamptz;   -- edge 
 -- ── v8: live stale-line test ─────────────────────────────────────────────────────
 alter table games add column if not exists book_fast_checked_at timestamptz;
 alter table bets add column if not exists alerted_at timestamptz;   -- stale-line alert sent
+
+-- ── v9: personal bet tracker ────────────────────────────────────────────────────
+create table if not exists user_bets (
+  id            bigserial primary key,
+  user_id       bigint not null references users (id) on delete cascade,
+  bet_id        bigint references bets (id) on delete set null,  -- board line it came from, if any
+  game_id       bigint references games (id) on delete set null,
+  book          text not null,
+  game_label    text not null,
+  market        text not null check (market in ('spread', 'total', 'prop')),
+  selection     text not null,
+  line          numeric(6, 1),
+  odds          int not null,
+  stake         numeric(10, 2) not null default 1,
+  result        char(1) check (result in ('W', 'L', 'P')),
+  graded_at     timestamptz,
+  closing_fair  numeric(6, 4),
+  notes         text,
+  placed_at     timestamptz not null default now()
+);
+create index if not exists user_bets_user_idx on user_bets (user_id, placed_at desc);

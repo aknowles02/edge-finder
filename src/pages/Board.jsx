@@ -455,6 +455,7 @@ function BetTable({ rows, sort, onSort, history }) {
                     <div className="flex items-center gap-1.5 text-[11px] text-muted">{marketName(b)} <VenueTag venue={b.venue} /></div>
                     <div className="whitespace-nowrap font-semibold text-white">{betLabel(b)}</div>
                     {b.volatile && <VolatileTag />}
+                    {!history && b.model === 'fair' && <LineActions bet={b} />}
                   </td>
                   <td className="px-3 py-3 text-right"><OddsCell bet={b} history={history} /></td>
                   <td className="px-3 py-3 text-right tabular-nums">
@@ -491,6 +492,7 @@ function BetCards({ rows, history }) {
                 <div className="text-[11px] text-muted">#{i + 1} · {b.game}{b.commenceTime && !b.started ? ` · ${kickoff(b.commenceTime)}` : ''}</div>
                 <div className="mt-0.5 font-semibold text-white">{betLabel(b)}</div>
                 {b.volatile && <VolatileTag />}
+                {!history && b.model === 'fair' && <LineActions bet={b} />}
                 <div className="flex items-center gap-1.5 text-[11px] text-muted-dim">{marketName(b)} <VenueTag venue={b.venue} /></div>
                 {b.flags && <div className="text-[11px] text-warn">⚠ {b.flags}</div>}
               </div>
@@ -615,5 +617,44 @@ function VolatileTag() {
       title="Touchdown/INT props swing on a single play. Not included in Edge Finder stats.">
       Volatile · not in stats
     </span>
+  );
+}
+
+/** Track a line in My Bets, or compare its price across every book. */
+function LineActions({ bet }) {
+  const [state, setState] = useState('');
+  const [shop, setShop] = useState(null);
+  async function track() {
+    const got = window.prompt(`Track ${betLabel(bet)}. What odds did you get?`, String(bet.odds));
+    if (got == null) return;
+    setState('saving');
+    try { await api.post('/api/my-bets', { betId: bet.id, odds: Number(String(got).replace(/\u2212/g, '-')) }); setState('saved'); }
+    catch (err) { setState(''); window.alert(err.message); }
+  }
+  async function compare() {
+    if (shop) return setShop(null);
+    try { setShop((await api.get(`/api/lines/${bet.id}`)).lines); } catch (err) { window.alert(err.message); }
+  }
+  return (
+    <div className="mt-1">
+      <div className="flex gap-2 text-[11px] font-semibold">
+        <button type="button" className="text-win-text hover:underline disabled:opacity-60" onClick={track} disabled={state !== ''}>
+          {state === 'saved' ? 'Tracked ✓' : state === 'saving' ? 'Saving…' : 'Track'}
+        </button>
+        <button type="button" className="text-muted hover:text-slate-200" onClick={compare} aria-expanded={!!shop}>{shop ? 'Hide books' : 'Compare books'}</button>
+      </div>
+      {shop && (
+        <ul className="mt-1.5 w-56 space-y-0.5 rounded-lg border border-ink-700 bg-ink-850 p-2 text-[11px]">
+          {shop.length === 0 && <li className="text-muted">No other books list this line.</li>}
+          {shop.map((l, i) => (
+            <li key={l.id} className="flex justify-between gap-2 tabular-nums">
+              <span className={i === 0 ? 'font-semibold text-white' : 'text-slate-300'}>{bookLabel(l.book)}{i === 0 && ' (best)'}</span>
+              <span className="text-slate-200">{formatOdds(l.odds)}</span>
+              <span className={l.edge > 0 ? 'text-win-text' : 'text-muted'}>{signedPct(l.edge)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

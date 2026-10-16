@@ -47,6 +47,7 @@ export default function Layout({ children }) {
           <Link to="/" aria-label="Edge Finder home"><Logo /></Link>
           <nav className="flex items-center">
             {has('board') && <NavLink to="/board" className={navClass}>Board</NavLink>}
+            {has('board') && <NavLink to="/my-bets" className={navClass}>My bets</NavLink>}
             {user && <NavLink to="/reports" className={navClass}>Results</NavLink>}
             {user?.isAdmin && <NavLink to="/admin" className={`${navClass({})} hidden sm:inline-flex`}>Admin</NavLink>}
             {user ? (

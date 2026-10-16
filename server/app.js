@@ -7,6 +7,7 @@ import boardRoutes from './routes/boards.js';
 import adminRoutes from './routes/admin.js';
 import billingRoutes, { stripeWebhook } from './routes/billing.js';
 import cronRoutes from './routes/cron.js';
+import myBetsRoutes from './routes/mybets.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -33,7 +34,7 @@ app.get('/api/tick', async (_req, res) => {
   res.set('Cache-Control', 'no-store').json({ ok: true, lastRunAt: s.lastRunAt, lastRunStatus: s.lastRunStatus,
     lastSuccessAt: s.lastSuccessAt, lastError: s.lastError, books: b ? { at: b.at, ...b.info } : null });
 });
-app.use('/api', authRoutes, boardRoutes, billingRoutes, adminRoutes, cronRoutes);
+app.use('/api', authRoutes, boardRoutes, billingRoutes, adminRoutes, cronRoutes, myBetsRoutes);
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 

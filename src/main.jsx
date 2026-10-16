@@ -15,6 +15,7 @@ const Admin = lazy(() => import('./pages/Admin.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
 const Subscribe = lazy(() => import('./pages/Subscribe.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
+const MyBets = lazy(() => import('./pages/MyBets.jsx'));
 const Terms = lazy(() => import('./pages/Legal.jsx').then((m) => ({ default: m.Terms })));
 const Privacy = lazy(() => import('./pages/Legal.jsx').then((m) => ({ default: m.Privacy })));
 
@@ -44,6 +45,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
               <Route path="/board" element={<RequireAuth need="board"><Board /></RequireAuth>} />
               <Route path="/board/:season/:week" element={<RequireAuth need="board"><Board /></RequireAuth>} />
               <Route path="/reports" element={<RequireAuth need="reports"><Reports /></RequireAuth>} />
+              <Route path="/my-bets" element={<RequireAuth need="board"><MyBets /></RequireAuth>} />
               <Route path="/account" element={<RequireAuth><Account /></RequireAuth>} />
               <Route path="/admin" element={<RequireAuth admin><Admin /></RequireAuth>} />
               <Route path="*" element={<NotFound />} />
