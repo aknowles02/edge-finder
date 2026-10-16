@@ -501,12 +501,11 @@ function BetCards({ rows, history }) {
 function Methodology({ history }) {
   return (
     <details className="mt-5 text-xs leading-relaxed text-muted-dim">
-      <summary className="cursor-pointer font-medium text-muted">How these numbers are calculated</summary>
+      <summary className="cursor-pointer font-medium text-muted">What these columns mean</summary>
       <div className="mt-2 space-y-1.5">
-        <p><b className="text-muted">Est. prob</b> is a historical hit rate: 75% from the full 2025 season, 25% from 2026 to date. Spreads pool both teams' games from the right side; totals pool both teams' games. Player props count only games where the player had a real role (QBs: 15+ attempts; runners: a carry; receivers: a target) and need 6+ such games. It is an estimate, not a guarantee. <span className="text-warn">●</span> flags samples under {SMALL_SAMPLE} games.</p>
-        <p><b className="text-muted">Fair odds</b> converts that probability to American odds. <b className="text-muted">Edge</b> = est. prob − the price's implied probability (|odds| ÷ (|odds| + 100)).</p>
-        <p>Lines on the same side of a game are correlated; “Best line per side” keeps just one.</p>
-        <p><b className="text-muted">Kalshi</b> prices are the current ask converted to American odds, with Kalshi's taker fee (0.07 × P × (1 − P)) included, so the edge is what you'd actually get. ⚠ marks games where a team's latest starting QB differs from its usual starter — the history may not reflect who's playing.</p>
+        <p><b className="text-muted">Est. prob</b> is our proprietary estimate of how often this exact line wins, built from real game results. It is an estimate, not a guarantee. <span className="text-warn">●</span> flags small samples, which are noisier.</p>
+        <p><b className="text-muted">Fair odds</b> converts that probability to American odds. <b className="text-muted">Edge</b> is the estimate minus the probability implied by the price, with fees included.</p>
+        <p>Lines on the same side of a game are correlated; “Best line per side” keeps just one. ⚠ marks games with a recent starting-QB change.</p>
         {history && <p><b className="text-muted">Locked odds</b> is the price when the bet first qualified; results and ROI are graded at that price. <b className="text-muted">CLV</b> is the closing implied probability minus the locked implied probability — positive means the market moved your way.</p>}
       </div>
     </details>

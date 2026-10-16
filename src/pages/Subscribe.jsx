@@ -66,7 +66,7 @@ export default function Subscribe() {
                 <li>{priceLabel(pro)} charged today.</li>
               )}
               <li>Renews automatically every month at {priceLabel(pro)} until you cancel.</li>
-              <li>Cancel anytime in Account → Manage billing. You keep access until the end of the period you paid for.</li>
+              <li>Cancel anytime with one click on your account page. You keep access until the end of the period you paid for.</li>
             </ul>
           </div>
 
@@ -80,7 +80,7 @@ export default function Subscribe() {
               {busy ? <Spinner className="h-4 w-4" /> : deferred ? `Subscribe — $0 today, then ${priceLabel(pro)}` : `Subscribe for ${priceLabel(pro)}`}
             </button>
           )}
-          <p className="mt-3 text-center text-xs text-muted-dim">Secure checkout by Stripe. We never see your card number.</p>
+          <p className="mt-3 text-center text-xs text-muted-dim">Secure checkout by Stripe. By subscribing you agree to the <Link to="/terms" className="underline">Terms</Link>, including automatic monthly renewal until you cancel.</p>
         </div>
       </div>
 

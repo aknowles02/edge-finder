@@ -74,4 +74,15 @@ router.patch('/me', requireUser, async (req, res) => {
   res.json({ user: publicUser(rows[0]) });
 });
 
+/** Self-serve account deletion: ends billing immediately and removes the account and sign-in tokens. */
+router.delete('/me', requireUser, async (req, res) => {
+  if (String(req.body?.confirm ?? '').trim().toLowerCase() !== 'delete') throw new HttpError(400, 'Type DELETE to confirm');
+  const { cancelAllNow } = await import('./billing.js');
+  await cancelAllNow(req.user.stripe_customer_id);
+  await query('delete from login_tokens where email = $1', [req.user.email]);
+  await query('delete from users where id = $1', [req.user.id]);
+  clearSession(res);
+  res.json({ ok: true });
+});
+
 export default router;

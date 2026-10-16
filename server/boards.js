@@ -20,19 +20,20 @@ function staleness(row, now = Date.now()) {
   return { tracked: true, stale: now - checked > limit };
 }
 
-function toBet(r) {
+function toBet(r, model = false) {
   const s = staleness(r);
   return {
     id: r.id, gameId: r.game_id, game: r.game_label, away: r.away, home: r.home,
     commenceTime: r.commence_time, started: Boolean(s.started),
     market: r.market, selection: r.selection, line: r.line, odds: r.odds,
-    hit2025: r.hit_2025, n2025: r.n_2025, hit2026: r.hit_2026, n2026: r.n_2026,
     blended: r.blended, implied: r.implied, edge: r.edge, sampleSize: r.sample_size,
     oddsUpdatedAt: r.odds_updated_at ?? r.created_at, lineMovedAt: r.line_moved_at,
     lineStatus: r.line_status, liveTracked: s.tracked, stale: s.stale, venue: r.venue, flags: r.flags,
     propKey: r.prop_key, player: r.player,
     qualifiedAt: r.qualified_at, qualifiedOdds: r.qualified_odds, qualifiedProb: r.qualified_prob, qualifiedEdge: r.qualified_edge,
     closingOdds: r.closing_odds, result: r.result,
+    // Per-season inputs are the model; only admins get them.
+    ...(model ? { hit2025: r.hit_2025, n2025: r.n_2025, hit2026: r.hit_2026, n2026: r.n_2026 } : {}),
   };
 }
 
@@ -44,7 +45,7 @@ const BET_SELECT = `
  * `current`: the live slate — bets with positive edge right now.
  * `history`: every bet that ever qualified, graded at its locked price.
  */
-export async function loadBoard(boardRow, { view = 'current' } = {}) {
+export async function loadBoard(boardRow, { view = 'current', model = false } = {}) {
   const filter = view === 'all' ? 'true' : view === 'history' ? 'b.qualified_at is not null' : 'b.edge > 0';
   const [{ rows: bets }, { rows: games }] = await Promise.all([
     query(`${BET_SELECT} where b.board_id = $1 and ${filter} order by b.edge desc`, [boardRow.id]),
@@ -57,7 +58,7 @@ export async function loadBoard(boardRow, { view = 'current' } = {}) {
       id: g.id, label: g.label, away: g.away, home: g.home, commenceTime: g.commence_time,
       awayScore: g.away_score, homeScore: g.home_score, liveTracked: Boolean(g.external_event_id), oddsCheckedAt: g.odds_checked_at, flags: g.flags,
     })),
-    bets: bets.map(toBet),
+    bets: bets.map((b) => toBet(b, model)),
   };
 }
 

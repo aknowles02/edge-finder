@@ -23,7 +23,7 @@ export const api = {
   get: (p) => request('GET', p),
   post: (p, b = {}) => request('POST', p, b),
   patch: (p, b) => request('PATCH', p, b),
-  del: (p) => request('DELETE', p),
+  del: (p, b) => request('DELETE', p, b),
 };
 
 export const pct = (v, d = 1) => (v == null ? '—' : `${(v * 100).toFixed(d)}%`);

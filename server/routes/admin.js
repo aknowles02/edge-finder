@@ -41,7 +41,7 @@ router.get('/admin/boards', async (_req, res) => {
 });
 
 router.get('/admin/boards/:id', async (req, res) => {
-  res.json({ board: await loadBoard(await boardById(req.params.id), { view: 'all' }) });
+  res.json({ board: await loadBoard(await boardById(req.params.id), { view: 'all', model: true }) });
 });
 
 /** Paste odds for a week. Creates the board (as draft) or replaces/appends its bets. */
@@ -179,7 +179,7 @@ router.post('/admin/boards/:id/scores', async (req, res) => {
       }
     }
   });
-  res.json({ graded, board: await loadBoard(board, { view: 'all' }) });
+  res.json({ graded, board: await loadBoard(board, { view: 'all', model: true }) });
 });
 
 /** Manual grade / override — used for props. */

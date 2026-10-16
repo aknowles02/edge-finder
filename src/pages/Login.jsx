@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
 import { Alert, Spinner } from '../components/ui.jsx';
@@ -52,7 +52,9 @@ export default function Login() {
             <button type="submit" className="btn-primary mt-6 w-full py-3" disabled={status === 'sending' || !email}>
               {status === 'sending' ? <Spinner className="h-4 w-4" /> : 'Email me a link'}
             </button>
-            <p className="mt-4 text-center text-xs text-muted-dim">By continuing you confirm you're 21+ and agree to bet responsibly.</p>
+            <p className="mt-4 text-center text-xs text-muted-dim">
+              By continuing you confirm you're 21+ and agree to the <Link to="/terms" className="underline hover:text-slate-300">Terms</Link> and <Link to="/privacy" className="underline hover:text-slate-300">Privacy Policy</Link>.
+            </p>
           </form>
         )}
       </div>

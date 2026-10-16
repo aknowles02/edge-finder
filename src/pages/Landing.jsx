@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import {
   ArrowRight, Broadcast, CaretDown, ChartLineUp, Crosshair, LockKey, Scales, SealCheck,
 } from '@phosphor-icons/react';
-import { formatOdds } from '../../shared/edge.js';
 import { ENTITLEMENTS, PLANS, TRIAL_DAYS, priceLabel } from '../../shared/plans.js';
 import { api, timeAgo } from '../lib/api.js';
 import { useAuth } from '../lib/auth.jsx';
@@ -29,13 +28,12 @@ export default function Landing() {
   }, []);
 
   const cta = user ? '/board' : SIGNUP;
-  const sample = preview?.rows?.find((r) => !r.locked);
 
   return (
     <div className="overflow-x-clip">
       <Hero preview={preview} cta={cta} />
       <Numbers preview={preview} />
-      <GapSection sample={sample} />
+      <GapSection example={preview?.rows?.[0]} />
       <HowItWorks />
       <MarketsMarquee />
       <TrackRecord record={record} />
@@ -92,10 +90,10 @@ function PrimaryCta({ to, children, className = '' }) {
   );
 }
 
-/** The real current board, top 10 by edge, with names redacted server-side. One sample row is open. */
+/** The real current board, top 10 by edge, fully redacted server-side. */
 function LockedBoard({ preview, to }) {
   const rows = preview?.rows ?? [];
-  const locked = Math.max(0, (preview?.opportunities ?? 0) - 1);
+  const locked = preview?.opportunities ?? 0;
   return (
     <Link to={to} aria-label={`Unlock all ${preview?.opportunities ?? ''} edges on this week's board`}
       className="board-card group relative block overflow-hidden rounded-2xl border border-ink-700 bg-ink-850/90 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.8)] ring-1 ring-white/[0.03] backdrop-blur transition duration-500 hover:-translate-y-1 hover:border-win/50">
@@ -107,32 +105,26 @@ function LockedBoard({ preview, to }) {
         <span className="text-xs text-muted">{preview?.lastMove ? `line moved ${timeAgo(preview.lastMove)}` : 'Live prices'}</span>
       </div>
 
-      <div className="hidden grid-cols-[28px_1fr_64px_64px_72px] gap-3 px-5 pt-3 text-[10px] font-medium uppercase tracking-wide text-muted-dim sm:grid">
-        <span>#</span><span>Bet</span><span className="text-right">Odds</span><span className="text-right">Hit rate</span><span className="text-right">Edge</span>
+      <div className="hidden grid-cols-[28px_1fr_72px_72px] gap-3 px-5 pt-3 text-[10px] font-medium uppercase tracking-wide text-muted-dim sm:grid">
+        <span>#</span><span>Bet</span><span className="text-right">Est. prob</span><span className="text-right">Edge</span>
       </div>
 
       <ol className="relative px-2 pb-24 pt-1 sm:px-3">
         {preview === undefined && Array.from({ length: 7 }, (_, i) => <li key={i} className="skeleton mx-2 my-2 h-11 rounded-lg" />)}
         {preview === null && <li className="px-3 py-10 text-center text-sm text-muted">This week's board is being built. Check back shortly.</li>}
         {rows.map((r, i) => (
-          <li key={r.rank} className={`row-in grid grid-cols-[22px_1fr_auto] items-center gap-3 rounded-lg px-2 py-2.5 sm:grid-cols-[28px_1fr_64px_64px_72px] sm:px-3 ${r.locked ? '' : 'sample-row'}`}
+          <li key={r.rank} className={`row-in grid grid-cols-[22px_1fr_auto] items-center gap-3 rounded-lg px-2 py-2.5 sm:grid-cols-[28px_1fr_72px_72px] sm:px-3`}
             style={{ '--d': `${300 + i * 70}ms` }}>
             <span className="text-xs tabular-nums text-muted-dim">{r.rank}</span>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
                 {r.market}
-                {!r.locked && <span className="rounded bg-win/25 px-1.5 py-px text-[9px] text-win-text">Free sample</span>}
               </div>
-              {r.locked ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="redacted truncate text-sm font-semibold" aria-hidden="true">{r.bet} {r.game}</span>
-                  <LockKey weight="fill" className="h-3.5 w-3.5 flex-none text-muted" aria-label="Locked" />
-                </div>
-              ) : (
-                <div className="truncate text-sm font-semibold text-white">{r.bet} <span className="font-normal text-muted">{r.game}</span></div>
-              )}
+              <div className="flex items-center gap-1.5">
+                <span className="redacted truncate text-sm font-semibold" aria-hidden="true">{r.bet} {r.game}</span>
+                <LockKey weight="fill" className="h-3.5 w-3.5 flex-none text-muted" aria-label="Locked" />
+              </div>
             </div>
-            <span className="hidden text-right text-sm tabular-nums text-slate-300 sm:block">{formatOdds(r.odds)}</span>
             <span className="hidden text-right text-sm tabular-nums text-slate-300 sm:block">{(r.prob * 100).toFixed(0)}%</span>
             <span className="text-right text-sm font-bold tabular-nums text-win-text">+{(r.edge * 100).toFixed(1)}%</span>
           </li>
@@ -142,7 +134,7 @@ function LockedBoard({ preview, to }) {
       <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-2 bg-gradient-to-t from-ink-850 via-ink-850/95 to-transparent px-4 pb-5 pt-14">
         <span className="inline-flex items-center gap-2 rounded-xl bg-win px-5 py-2.5 text-sm font-semibold text-white shadow-[0_10px_30px_-10px_rgba(30,107,69,0.9)] transition duration-300 group-hover:scale-[1.03]">
           <LockKey weight="bold" className="h-4 w-4" />
-          Unlock {locked > 0 ? `${locked} more edges` : 'the board'}
+          Unlock {locked > 0 ? `all ${locked} edges` : 'the board'}
         </span>
         <span className="text-[11px] text-muted">{TRIAL_DAYS} days free. No card required.</span>
       </div>
@@ -177,10 +169,11 @@ function Numbers({ preview }) {
 
 /* ── The core idea, as one picture ───────────────────────────────────── */
 
-function GapSection({ sample }) {
+function GapSection({ example }) {
   const ref = useReveal({ threshold: 0.35 });
-  const implied = sample ? 1 / (1 + 100 / Math.abs(sample.odds)) : 0.75;
-  const hit = sample?.prob ?? 0.88;
+  // The current #1 edge, anonymized: just the two probabilities.
+  const hit = example?.prob ?? 0.88;
+  const implied = example ? example.prob - example.edge : 0.75;
   const gap = hit - implied;
   return (
     <section className="mx-auto grid max-w-7xl items-center gap-12 px-4 py-20 sm:px-6 lg:grid-cols-2 lg:py-28">
@@ -189,7 +182,7 @@ function GapSection({ sample }) {
         <p className="mt-5 max-w-lg text-base leading-relaxed text-muted sm:text-lg">
           Every alt line has a price, and every price implies a probability. We compare it to how often that exact line has actually hit. When history beats the price, that gap is your edge.
         </p>
-        {sample && <p className="mt-4 text-sm text-muted-dim">Live example from this week: {sample.bet} at {formatOdds(sample.odds)}.</p>}
+        {example && <p className="mt-4 text-sm text-muted-dim">Shown: this week's top-ranked line. Unlock the board to see which one.</p>}
       </Reveal>
 
       <div ref={ref} className="gap-viz reveal rounded-2xl border border-ink-700 bg-ink-850 p-6 sm:p-8">
@@ -228,7 +221,7 @@ function Bar({ label, value, tone, delay = 0 }) {
 
 const STEPS = [
   { icon: Broadcast, title: 'Price', body: 'Every alt spread, total and player ladder is re-priced from live markets, with timestamps on every line move.' },
-  { icon: Crosshair, title: 'Score', body: 'Each line is checked against real results: 75% last season, 25% this season. Thin samples get flagged.' },
+  { icon: Crosshair, title: 'Score', body: 'Each line is checked against how often it has actually hit in real games. Thin samples get flagged.' },
   { icon: SealCheck, title: 'Track', body: 'The moment a line qualifies it is locked and graded at that price. Wins, losses, ROI and closing line value, in public.' },
 ];
 

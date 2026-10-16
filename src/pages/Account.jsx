@@ -41,6 +41,23 @@ export default function Account() {
   }
 
   const premium = user.plan === 'pro';
+
+  async function post(path, done) {
+    setBusy(path); setError('');
+    try { await api.post(path); await refresh(); done?.(); } catch (err) { setError(err.message); }
+    setBusy('');
+  }
+
+  async function deleteAccount() {
+    const typed = window.prompt('This permanently deletes your account and immediately ends any subscription. Type DELETE to confirm.');
+    if (typed == null) return;
+    setBusy('delete'); setError('');
+    try {
+      await api.del('/api/me', { confirm: typed });
+      await logout().catch(() => {});
+      navigate('/');
+    } catch (err) { setError(err.message); setBusy(''); }
+  }
   const fmt = (d) => new Date(d).toLocaleDateString([], { dateStyle: 'medium' });
   const price = priceLabel(PLANS.pro);
   const trialing = user.subscriptionStatus === 'trialing';
@@ -77,13 +94,24 @@ export default function Account() {
               {premium && <span className="ml-2 text-sm font-medium text-muted">{price}</span>}
             </div>
             <p className="mt-1 text-sm text-muted">{planLine}</p>
-            {user.subscriptionStatus === 'past_due' && <p className="mt-2 text-sm text-warn">Your last payment failed. Update your card in Manage billing to keep Pro.</p>}
+            {user.subscriptionStatus === 'past_due' && <p className="mt-2 text-sm text-warn">Your last payment failed. Update your card under "Update card & invoices" to keep Pro.</p>}
           </div>
           <div className="flex flex-col gap-2">
             {!premium && <Link to="/subscribe" className="btn-primary">{user.plan === 'trial' ? 'Subscribe to Pro' : `Get Pro — ${price}`}</Link>}
             {user.hasBilling && (
               <button type="button" className="btn-ghost" disabled={!!busy} onClick={() => go('/api/billing/portal')}>
-                {busy === '/api/billing/portal' ? <Spinner className="h-4 w-4" /> : premium ? 'Manage billing or cancel' : 'Billing history'}
+                {busy === '/api/billing/portal' ? <Spinner className="h-4 w-4" /> : premium ? 'Update card & invoices' : 'Billing history'}
+              </button>
+            )}
+            {premium && user.hasBilling && !user.cancelAtPeriodEnd && (
+              <button type="button" className="btn-ghost text-loss-text" disabled={!!busy}
+                onClick={() => { if (window.confirm(`Cancel ${PLANS.pro.name}? You keep access until ${user.currentPeriodEnd ? fmt(user.currentPeriodEnd) : 'the end of this period'} and won't be charged again.`)) post('/api/billing/cancel'); }}>
+                {busy === '/api/billing/cancel' ? <Spinner className="h-4 w-4" /> : 'Cancel subscription'}
+              </button>
+            )}
+            {premium && user.cancelAtPeriodEnd && (
+              <button type="button" className="btn-ghost" disabled={!!busy} onClick={() => post('/api/billing/resume')}>
+                {busy === '/api/billing/resume' ? <Spinner className="h-4 w-4" /> : 'Resume subscription'}
               </button>
             )}
           </div>
@@ -104,6 +132,14 @@ export default function Account() {
             <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${premium && user.alertsOptIn ? 'left-[22px]' : 'left-0.5'}`} />
           </button>
         </div>
+      </section>
+
+      <section className="card border-loss/30 p-6">
+        <div className="font-semibold text-white">Delete account</div>
+        <p className="mt-1 text-sm text-muted">Permanently removes your account and email from Edge Finder and ends any subscription immediately. Stripe keeps payment records it is legally required to keep.</p>
+        <button type="button" className="btn-ghost mt-4 text-loss-text" disabled={!!busy} onClick={deleteAccount}>
+          {busy === 'delete' ? <Spinner className="h-4 w-4" /> : 'Delete my account'}
+        </button>
       </section>
 
       <button type="button" className="btn-ghost w-full sm:w-auto"

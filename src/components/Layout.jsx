@@ -53,7 +53,12 @@ export default function Layout({ children }) {
       <main className="flex-1">{children}</main>
       <footer className="border-t border-ink-700/70 px-4 py-8 text-center text-xs text-muted-dim">
         <p>Edge Finder publishes data, not guarantees. Estimated probabilities come from past games; past results don't predict future outcomes.</p>
-        <p className="mt-1">21+. Bet responsibly. Gambling problem? Call 1-800-GAMBLER.</p>
+        <p className="mt-1">21+. Not a sportsbook; for informational purposes only. Gambling problem? Call or text 1-800-GAMBLER.</p>
+        <nav className="mt-3 flex justify-center gap-4 text-muted" aria-label="Legal">
+          <Link to="/terms" className="hover:text-slate-200">Terms</Link>
+          <Link to="/privacy" className="hover:text-slate-200">Privacy</Link>
+          <a href="https://www.ncpgambling.org" target="_blank" rel="noreferrer" className="hover:text-slate-200">Responsible gambling</a>
+        </nav>
       </footer>
     </div>
   );

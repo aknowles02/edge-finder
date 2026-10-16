@@ -15,6 +15,8 @@ const Admin = lazy(() => import('./pages/Admin.jsx'));
 const NotFound = lazy(() => import('./pages/NotFound.jsx'));
 const Subscribe = lazy(() => import('./pages/Subscribe.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
+const Terms = lazy(() => import('./pages/Legal.jsx').then((m) => ({ default: m.Terms })));
+const Privacy = lazy(() => import('./pages/Legal.jsx').then((m) => ({ default: m.Privacy })));
 
 // Signed-in users open straight onto the Edge Board (or the subscribe decision once the trial ends).
 function Home() {
@@ -35,6 +37,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/subscribe" element={<Subscribe />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/privacy" element={<Privacy />} />
               <Route path="/login" element={<Login />} />
               <Route path="/auth/verify" element={<Verify />} />
               <Route path="/board" element={<RequireAuth need="board"><Board /></RequireAuth>} />

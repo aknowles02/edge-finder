@@ -63,6 +63,33 @@ router.post('/billing/checkout', requireUser, async (req, res) => {
   res.json({ url: session.url });
 });
 
+async function activeSubscriptions(customer) {
+  const { data } = await getStripe().subscriptions.list({ customer, status: 'all', limit: 20 });
+  return data.filter((x) => ['active', 'trialing', 'past_due', 'unpaid'].includes(x.status));
+}
+
+/** In-app cancel: stops renewal at the end of the paid period. No retention maze. */
+router.post('/billing/cancel', requireUser, async (req, res) => {
+  if (!req.user.stripe_customer_id) throw new HttpError(400, 'No active subscription');
+  const subs = await activeSubscriptions(req.user.stripe_customer_id);
+  if (!subs.length) throw new HttpError(400, 'No active subscription');
+  for (const sub of subs) await syncSubscription(await getStripe().subscriptions.update(sub.id, { cancel_at_period_end: true }));
+  res.json({ ok: true });
+});
+
+router.post('/billing/resume', requireUser, async (req, res) => {
+  if (!req.user.stripe_customer_id) throw new HttpError(400, 'No subscription');
+  const subs = await activeSubscriptions(req.user.stripe_customer_id);
+  for (const sub of subs) await syncSubscription(await getStripe().subscriptions.update(sub.id, { cancel_at_period_end: false }));
+  res.json({ ok: true });
+});
+
+/** Used by account deletion: end billing immediately. */
+export async function cancelAllNow(customer) {
+  if (!customer) return;
+  for (const sub of await activeSubscriptions(customer)) await getStripe().subscriptions.cancel(sub.id);
+}
+
 router.post('/billing/portal', requireUser, async (req, res) => {
   if (!req.user.stripe_customer_id) throw new HttpError(400, 'No billing account yet');
   const session = await getStripe().billingPortal.sessions.create({
