@@ -39,6 +39,18 @@ Defined once in `shared/plans.js` (the API enforces them, the UI renders copy fr
   Subscribing mid-trial defers the first charge to the trial's end (Stripe `trial_end`), and checkout states the price, first-charge date and auto-renewal.
 - Adding a tier later (e.g. sport-specific or Elite): add an entry to `PLANS` with its own `stripePriceEnv`, `entitlements` and `sports`. Webhooks map the Stripe price back to the plan.
 
+## Edge model: your sportsbook vs. Kalshi fair value
+
+Kalshi's NFL ladders are efficiently priced (backtested 2025-26), so they are the fair-price reference:
+`server/fair.js` fits each game's margin/total to the whole Kalshi ladder (empirical NFL result shape, key
+numbers, pushes) and interpolates player ladders for props. `server/books.js` pulls every supported
+sportsbook from The Odds API in one request per game (`ODDS_API_KEY`), and edge = fair probability −
+the book's implied probability. Users pick their book; boards and records are per book. Lines qualify
+as tracked opportunities at edge ≥ 1% inside the board's odds window. Credits: ~13 per game per pull;
+cadence 12h → 6h → 3h → 1h toward kickoff; stops at `ODDS_API_MIN_CREDITS` (default 300). Override
+markets with `ODDS_API_MARKETS`. The earlier hit-rate method is retired (`EDGE_MODEL=hitrate` restores
+it); its picks remain on the record, reported separately.
+
 ## Automated boards (no pasting required)
 
 `server/pipeline.js` runs on page views (throttled to once per 90s), Vercel Cron, the admin button, or `GET /api/tick` (point any free uptime pinger at it). Each run:

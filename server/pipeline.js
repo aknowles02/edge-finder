@@ -15,6 +15,9 @@ import { currentWeek, loadGames } from './nflverse.js';
 import { qualifyBets } from './boards.js';
 import { refreshDraftKings } from './odds.js';
 import { alertAdminsOfErrors, alertBoardOnce } from './alerts.js';
+import { bookCadenceMs, fetchEventOdds, listEvents, scoreEventOdds, scoreKalshiAsBook } from './books.js';
+import { residualModels } from './fair.js';
+import { matchEvent } from './odds.js';
 
 const SEASON = Number(process.env.SEASON || 2026);
 const MIN_RUN_GAP_S = 90;
@@ -114,6 +117,8 @@ export async function buildWeek({ week, ladders, games, players } = {}) {
          set commence_time = excluded.commence_time, external_event_id = excluded.external_event_id, flags = excluded.flags`,
       [board.id, JSON.stringify(gameRows)],
     );
+    // The hit-rate method is retired; boards now carry sportsbook lines priced against Kalshi (refreshBooks).
+    const hitRateRows = process.env.EDGE_MODEL === 'hitrate' ? rows : [];
     const { rowCount } = await db.query(
       `insert into bets (board_id, game_id, venue, external_ref, external_side, market, selection, line, odds,
                          hit_2025, n_2025, hit_2026, n_2026, blended, implied, edge, sample_size,
@@ -128,7 +133,7 @@ export async function buildWeek({ week, ladders, games, players } = {}) {
        on conflict (board_id, external_ref, external_side) where external_ref is not null do update
          set hit_2025 = excluded.hit_2025, n_2025 = excluded.n_2025, hit_2026 = excluded.hit_2026, n_2026 = excluded.n_2026,
              blended = excluded.blended, sample_size = excluded.sample_size, edge = excluded.blended - bets.implied`,
-      [board.id, JSON.stringify(rows)],
+      [board.id, JSON.stringify(hitRateRows)],
     );
     let published = false;
     if (board.status !== 'published' && autoPublish()) {
@@ -152,7 +157,7 @@ export async function refreshKalshi({ ladders } = {}) {
   const { rows: open } = await query(
     `select b.id, b.external_ref, b.external_side, b.odds, b.line_status
        from bets b join boards bd on bd.id = b.board_id join games g on g.id = b.game_id
-      where b.venue = 'kalshi' and bd.kind = 'live' and bd.status = 'published'
+      where b.venue = 'kalshi' and b.model <> 'fair' and bd.kind = 'live' and bd.status = 'published'
         and (g.commence_time is null or g.commence_time > now())`,
   );
   const updates = [];
@@ -188,6 +193,84 @@ export async function refreshKalshi({ ladders } = {}) {
     );
   });
   return { priced: updates.length, moved: updates.filter((u) => u.moved).length, missing: updates.filter((u) => u.odds == null).length };
+}
+
+const RESERVE_CREDITS = Number(process.env.ODDS_API_MIN_CREDITS || 300);
+
+/** Upsert scored lines for one game (any books) and log price moves. */
+async function upsertBookLines(gameRow, rows) {
+  const keep = rows.filter((r) => r.edge > -0.03); // far-negative lines are noise; skip storing them
+  if (!keep.length) return { stored: 0, moved: 0 };
+  const { rows: existing } = await query(
+    `select external_ref, odds, id from bets where game_id = $1 and model = 'fair' and external_ref = any($2)`,
+    [gameRow.id, keep.map((r) => r.ref)],
+  );
+  const prev = new Map(existing.map((e) => [e.external_ref, e]));
+  await query(
+    `insert into bets (board_id, game_id, venue, model, external_ref, external_side, market, selection, line, odds,
+                       blended, implied, edge, sample_size, line_status, odds_updated_at, prop_key, player, prop_side)
+     select $1, $2, x.book, 'fair', x.ref, 'book', x.market, x.selection, x.line, x.odds,
+            x.fair, x.implied, x.edge, 0, 'live', now(), x."propKey", x.player, x."propSide"
+       from jsonb_to_recordset($3::jsonb) as x(book text, market text, selection text, line numeric, odds int, fair numeric,
+            implied numeric, edge numeric, ref text, "propKey" text, player text, "propSide" text)
+     on conflict (board_id, external_ref, external_side) where external_ref is not null do update
+       set odds = excluded.odds, implied = excluded.implied, blended = excluded.blended, edge = excluded.edge,
+           line_status = 'live', odds_updated_at = now(),
+           line_moved_at = case when bets.odds <> excluded.odds then now() else bets.line_moved_at end`,
+    [gameRow.board_id, gameRow.id, JSON.stringify(keep)],
+  );
+  const moved = keep.filter((r) => prev.has(r.ref) && prev.get(r.ref).odds !== r.odds);
+  if (moved.length) {
+    await query(
+      `insert into bet_price_history (bet_id, odds)
+       select b.id, x.odds from jsonb_to_recordset($2::jsonb) as x(ref text, odds int)
+         join bets b on b.game_id = $1 and b.external_ref = x.ref and b.model = 'fair'`,
+      [gameRow.id, JSON.stringify(moved.map((r) => ({ ref: r.ref, odds: r.odds })))],
+    );
+  }
+  return { stored: keep.length, moved: moved.length };
+}
+
+/**
+ * Price every open game's sportsbook lines against Kalshi fair value.
+ * Kalshi (as a book) is free and runs every time; sportsbooks need ODDS_API_KEY and follow the cadence.
+ */
+export async function refreshBooks({ ladders, games, force = false } = {}) {
+  ladders ??= await fetchAllLadders();
+  games ??= await loadGames();
+  const models = residualModels(games, SEASON);
+  const { rows: open } = await query(
+    `select g.*, bd.sport from games g join boards bd on bd.id = g.board_id
+      where bd.kind = 'live' and bd.status = 'published' and g.away_score is null
+        and g.commence_time > now()`,
+  );
+  const out = { games: open.length, kalshi: 0, sportsbooks: 0, moved: 0, credits: null, skipped: 0 };
+  let events = null;
+  for (const g of open) {
+    const kalshi = ladders.filter((e) => teamsMatch(e.teams, g.away, g.home)
+      && Math.abs(new Date(e.date) - new Date(g.commence_time)) <= 1.5 * 86_400_000);
+    if (!kalshi.length) continue;
+    if (process.env.KALSHI_AS_BOOK === '1') { // research only; see shared/books.js
+      const k = await upsertBookLines(g, scoreKalshiAsBook(kalshi, g, models));
+      out.kalshi += k.stored; out.moved += k.moved;
+    }
+
+    if (!process.env.ODDS_API_KEY) continue;
+    const kickoff = new Date(g.commence_time).getTime();
+    const due = force || !g.book_checked_at || Date.now() - new Date(g.book_checked_at).getTime() >= bookCadenceMs(kickoff) - 60_000;
+    if (!due) continue;
+    if (out.credits != null && out.credits < RESERVE_CREDITS) { out.skipped++; continue; }
+    events ??= await listEvents(g.sport);
+    const ev = (g.odds_event_id && events.find((e) => e.id === g.odds_event_id)) || matchEvent(g.sport, g, events);
+    if (!ev) continue;
+    const { data, remaining } = await fetchEventOdds(ev.id, g.sport);
+    out.credits = remaining ?? out.credits;
+    await query('update games set odds_event_id = $1, book_checked_at = now() where id = $2', [ev.id, g.id]);
+    if (!data) continue;
+    const r = await upsertBookLines(g, scoreEventOdds(data, g, kalshi, models, g.sport));
+    out.sportsbooks += r.stored; out.moved += r.moved;
+  }
+  return out;
 }
 
 /** Lock closing prices at kickoff and qualify any newly positive-edge lines. */
@@ -294,7 +377,9 @@ export async function runPipeline({ force = false, build = false } = {}) {
     await step('build', async () => { const r = await buildWeek({ ladders, games }); await mark(BUILD_KEY, r); return r; });
   }
   if (ladders) await step('kalshi', () => refreshKalshi({ ladders }));
-  if (process.env.ODDS_API_KEY) await step('draftkings', () => refreshDraftKings({ force }));
+  if (ladders && games) await step('books', () => refreshBooks({ ladders, games, force }));
+  // Legacy: re-pricing pasted DraftKings lines. The book step above covers sportsbooks now.
+  if (process.env.ODDS_API_KEY && process.env.EDGE_MODEL === 'hitrate') await step('draftkings', () => refreshDraftKings({ force }));
   await step('qualify', lockAndQualify);
   if (force || await due('grade', 30)) {
     await step('grade', async () => {
@@ -306,8 +391,8 @@ export async function runPipeline({ force = false, build = false } = {}) {
     });
   }
 
-  const priced = (summary.kalshi?.priced ?? 0) + (summary.draftkings?.games ?? 0);
-  const moved = (summary.kalshi?.moved ?? 0) + (summary.draftkings?.changed ?? 0);
+  const priced = (summary.kalshi?.priced ?? 0) + (summary.books?.kalshi ?? 0) + (summary.books?.sportsbooks ?? 0);
+  const moved = (summary.kalshi?.moved ?? 0) + (summary.books?.moved ?? 0);
   await query(
     `update odds_refresh_runs set finished_at = now(), status = $2, games_checked = $3, prices_changed = $4, error = $5 where id = $1`,
     [runId, errors.length ? 'error' : 'ok', priced, moved, errors.join(' | ') || null],

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { PLANS, priceLabel } from '../../shared/plans.js';
+import { BOOKS, DEFAULT_BOOK } from '../../shared/books.js';
 import { api } from '../lib/api.js';
 import { daysLeft, useAuth } from '../lib/auth.jsx';
 import { Alert, Spinner } from '../components/ui.jsx';
@@ -132,6 +133,15 @@ export default function Account() {
             <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${premium && user.alertsOptIn ? 'left-[22px]' : 'left-0.5'}`} />
           </button>
         </div>
+      </section>
+
+      <section className="card p-6">
+        <label htmlFor="book" className="font-semibold text-white">My sportsbook</label>
+        <p className="mt-0.5 text-sm text-muted">The board and results show lines at this book.</p>
+        <select id="book" className="input mt-3 max-w-xs" value={user.book || DEFAULT_BOOK} disabled={!!busy}
+          onChange={async (e) => { setBusy('book'); try { const { user: u } = await api.patch('/api/me', { book: e.target.value }); setUser(u); } catch (err) { setError(err.message); } setBusy(''); }}>
+          {BOOKS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+        </select>
       </section>
 
       <section className="card border-loss/30 p-6">

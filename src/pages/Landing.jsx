@@ -178,17 +178,17 @@ function GapSection({ example }) {
   return (
     <section className="mx-auto grid max-w-7xl items-center gap-12 px-4 py-20 sm:px-6 lg:grid-cols-2 lg:py-28">
       <Reveal>
-        <h2 className="text-3xl font-bold tracking-tight text-white sm:text-5xl">The price says one thing. History says another.</h2>
+        <h2 className="text-3xl font-bold tracking-tight text-white sm:text-5xl">Your book says one thing. The market says another.</h2>
         <p className="mt-5 max-w-lg text-base leading-relaxed text-muted sm:text-lg">
-          Every alt line has a price, and every price implies a probability. We compare it to how often that exact line has actually hit. When history beats the price, that gap is your edge.
+          Sportsbooks price hundreds of alt lines and props, and they don't keep every one in step with the market. We compare each line at your book to a sharp fair price. When your book is offering more than the bet is worth, that gap is your edge.
         </p>
         {example && <p className="mt-4 text-sm text-muted-dim">Shown: this week's top-ranked line. Unlock the board to see which one.</p>}
       </Reveal>
 
       <div ref={ref} className="gap-viz reveal rounded-2xl border border-ink-700 bg-ink-850 p-6 sm:p-8">
-        <Bar label="What the price implies" value={implied} tone="market" />
+        <Bar label="What your book's price implies" value={implied} tone="market" />
         <div className="my-5" />
-        <Bar label="How often it actually hit" value={hit} tone="history" delay={250} />
+        <Bar label="Fair probability" value={hit} tone="history" delay={250} />
         <div className="relative mt-6 h-12">
           <div className="gap-bracket absolute top-0 h-5 rounded-b-md border-x-2 border-b-2 border-win-text"
             style={{ left: `${implied * 100}%`, width: `${Math.max(gap, 0.01) * 100}%` }} />
@@ -220,8 +220,8 @@ function Bar({ label, value, tone, delay = 0 }) {
 /* ── How it works: three verbs, one connected track ──────────────────── */
 
 const STEPS = [
-  { icon: Broadcast, title: 'Price', body: 'Every alt spread, total and player ladder is re-priced from live markets, with timestamps on every line move.' },
-  { icon: Crosshair, title: 'Score', body: 'Each line is checked against how often it has actually hit in real games. Thin samples get flagged.' },
+  { icon: Broadcast, title: 'Price', body: 'Your sportsbook\u2019s alt spreads, totals and player props are pulled live, with timestamps on every line move.' },
+  { icon: Crosshair, title: 'Score', body: 'Each line is compared to a sharp fair price. When your book is slower than the market, that gap is your edge.' },
   { icon: SealCheck, title: 'Track', body: 'The moment a line qualifies it is locked and graded at that price. Wins, losses, ROI and closing line value, in public.' },
 ];
 
@@ -359,7 +359,7 @@ function Pricing({ cta }) {
 
 const FAQS = [
   ['Is this a guarantee?', 'No. Hit rates come from past games and a positive edge can still lose. We show every result, wins and losses, so you can judge the method yourself.'],
-  ['Where do the prices come from?', 'Live Kalshi markets for alt spreads, totals and player props, re-priced throughout the day. Kalshi’s fee is included, so the edge is what you would actually get.'],
+  ['Do I need accounts at lots of sportsbooks?', 'No. Pick the one book you use (DraftKings, FanDuel, BetMGM, Caesars and more) and the board only shows lines you can bet there.'],
   ['Do I need a card for the trial?', `No. The ${TRIAL_DAYS}-day trial needs only your email and ends on its own. You choose whether to subscribe.`],
   ['How do I cancel Pro?', 'From your account page, anytime. You keep access until the end of the month you paid for.'],
 ];

@@ -34,6 +34,8 @@ export function parseGames(csv) {
     home: canonTeam(r[ix.home_team]),
     awayScore: num(r[ix.away_score]),
     homeScore: num(r[ix.home_score]),
+    spreadLine: num(r[ix.spread_line]), // closing expected home margin
+    totalLine: num(r[ix.total_line]),
     awayQb: r[ix.away_qb_name] || null,
     homeQb: r[ix.home_qb_name] || null,
   }));

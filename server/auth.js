@@ -37,6 +37,7 @@ export function publicUser(user) {
     currentPeriodEnd: user.current_period_end,
     cancelAtPeriodEnd: user.cancel_at_period_end,
     alertsOptIn: user.alerts_opt_in,
+    book: user.book,
     isAdmin: isAdmin(user),
     hasBilling: Boolean(user.stripe_customer_id),
   };

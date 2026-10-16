@@ -6,6 +6,7 @@ import { query } from '../db.js';
 import { HttpError, clearSession, issueSession, publicUser, requireUser } from '../auth.js';
 import { sendMagicLink } from '../email.js';
 import { track } from '../funnel.js';
+import { isBook } from '../../shared/books.js';
 
 const router = Router();
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -72,8 +73,12 @@ router.get('/me', (req, res) => {
 });
 
 router.patch('/me', requireUser, async (req, res) => {
-  if (typeof req.body?.alertsOptIn !== 'boolean') throw new HttpError(400, 'alertsOptIn must be true or false');
-  const { rows } = await query('update users set alerts_opt_in = $1 where id = $2 returning *', [req.body.alertsOptIn, req.user.id]);
+  const { alertsOptIn, book } = req.body ?? {};
+  if (alertsOptIn !== undefined && typeof alertsOptIn !== 'boolean') throw new HttpError(400, 'alertsOptIn must be true or false');
+  if (book !== undefined && !isBook(book)) throw new HttpError(400, 'Unknown sportsbook');
+  const { rows } = await query(
+    'update users set alerts_opt_in = coalesce($1, alerts_opt_in), book = coalesce($2, book) where id = $3 returning *',
+    [alertsOptIn ?? null, book ?? null, req.user.id]);
   res.json({ user: publicUser(rows[0]) });
 });
 

@@ -1,5 +1,6 @@
 import { summarize, summarizeTracked } from '../shared/edge.js';
 import { VOLATILE_PROPS } from '../shared/props.js';
+import { DEFAULT_BOOK, MIN_QUALIFY_EDGE } from '../shared/books.js';
 import { query } from './db.js';
 import { refreshIntervalMs } from './odds.js';
 
@@ -31,6 +32,7 @@ function toBet(r, model = false) {
     oddsUpdatedAt: r.odds_updated_at ?? r.created_at, lineMovedAt: r.line_moved_at,
     lineStatus: r.line_status, liveTracked: s.tracked, stale: s.stale, venue: r.venue, flags: r.flags,
     volatile: VOLATILE_PROPS.includes(r.prop_key),
+    model: r.model, book: r.model === 'fair' ? r.venue : null,
     propKey: r.prop_key, player: r.player,
     qualifiedAt: r.qualified_at, qualifiedOdds: r.qualified_odds, qualifiedProb: r.qualified_prob, qualifiedEdge: r.qualified_edge,
     closingOdds: r.closing_odds, result: r.result,
@@ -47,10 +49,15 @@ const BET_SELECT = `
  * `current`: the live slate — bets with positive edge right now.
  * `history`: every bet that ever qualified, graded at its locked price.
  */
-export async function loadBoard(boardRow, { view = 'current', model = false } = {}) {
+export async function loadBoard(boardRow, { view = 'current', model = false, book = DEFAULT_BOOK } = {}) {
   const filter = view === 'all' ? 'true' : view === 'history' ? 'b.qualified_at is not null' : 'b.edge > 0';
+  // Current slate: only Kalshi-fair-priced lines at the viewer's book. History: that book's lines plus
+  // any picks from the retired hit-rate method. Admin ('all'): everything.
+  const scope = view === 'all' ? 'true'
+    : view === 'current' ? `b.model = 'fair' and b.venue = $2`
+      : `(b.model <> 'fair' or b.venue = $2)`;
   const [{ rows: bets }, { rows: games }] = await Promise.all([
-    query(`${BET_SELECT} where b.board_id = $1 and ${filter} order by b.edge desc`, [boardRow.id]),
+    query(`${BET_SELECT} where b.board_id = $1 and ${filter} and ($2::text is not null) and ${scope} order by b.edge desc`, [boardRow.id, book]),
     query('select * from games where board_id = $1 order by commence_time nulls last, id', [boardRow.id]),
   ]);
   return {
@@ -70,8 +77,9 @@ export async function qualifyBets(db, boardId) {
     `update bets b set qualified_at = now(), qualified_odds = b.odds, qualified_prob = b.blended, qualified_edge = b.edge
        from boards bd
       where bd.id = b.board_id and bd.id = $1 and bd.status = 'published' and b.qualified_at is null
-        and b.edge > 0 and b.odds between bd.odds_min and bd.odds_max`,
-    [boardId],
+        and b.edge > case when b.model = 'fair' then $2::numeric else 0 end
+        and b.odds between bd.odds_min and bd.odds_max`,
+    [boardId, MIN_QUALIFY_EDGE],
   );
   return rowCount;
 }
@@ -80,14 +88,15 @@ export async function qualifyBets(db, boardId) {
  * Tracked opportunities for stats. Volatile props (TDs, INTs) are excluded unless `volatile` is
  * 'only' (for their own, separately labelled summary).
  */
-async function trackedRows(kind, { boardId, volatile = 'exclude' } = {}) {
+async function trackedRows(kind, { boardId, volatile = 'exclude', model = 'fair', book = DEFAULT_BOOK } = {}) {
   const { rows } = await query(
     `select b.qualified_odds, b.odds, b.result, b.closing_odds, b.market, b.prop_key, bd.id as board_id, bd.week, bd.season, bd.sport
        from bets b join boards bd on bd.id = b.board_id
       where bd.status = 'published' and bd.kind = $1 and b.qualified_at is not null
         and ($2::bigint is null or bd.id = $2)
-        and (case when $4 = 'only' then coalesce(b.prop_key, '') = any($3) else coalesce(b.prop_key, '') <> all($3) end)`,
-    [kind, boardId ?? null, VOLATILE_PROPS, volatile],
+        and (case when $4 = 'only' then coalesce(b.prop_key, '') = any($3) else coalesce(b.prop_key, '') <> all($3) end)
+        and b.model = $5 and ($5 <> 'fair' or $6::text is null or b.venue = $6)`,
+    [kind, boardId ?? null, VOLATILE_PROPS, volatile, model, book],
   );
   return rows.map((r) => ({ ...r, qualifiedOdds: r.qualified_odds, closingOdds: r.closing_odds }));
 }

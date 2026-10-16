@@ -193,3 +193,10 @@ create table if not exists funnel_daily (
   count int  not null default 0,
   primary key (day, kind, path, ref)
 );
+
+-- ── v6: pick-your-book (sportsbook lines priced against Kalshi fair value) ─────────
+alter table users add column if not exists book text;
+alter table bets add column if not exists model text not null default 'hitrate'; -- hitrate (retired) | fair
+alter table games add column if not exists odds_event_id text;
+alter table games add column if not exists book_checked_at timestamptz;
+create index if not exists bets_board_model_venue_idx on bets (board_id, model, venue);

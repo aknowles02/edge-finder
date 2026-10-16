@@ -5,6 +5,7 @@ import {
 } from '../../shared/edge.js';
 import { api, kickoff, pct, signedPct, timeAgo, units } from '../lib/api.js';
 import { PROP_GROUPS, PROP_STATS } from '../../shared/props.js';
+import { BOOKS, DEFAULT_BOOK, bookLabel } from '../../shared/books.js';
 import { useAuth } from '../lib/auth.jsx';
 import { Alert, LockIcon, ResultBadge, Spinner } from '../components/ui.jsx';
 
@@ -35,7 +36,11 @@ export default function Board() {
   const [params, setParams] = useSearchParams();
   const sport = params.get('sport') || 'nfl';
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
+  const book = user?.book || DEFAULT_BOOK;
+  async function chooseBook(key) {
+    try { const { user: u } = await api.patch('/api/me', { book: key }); setUser(u); } catch { /* keep current */ }
+  }
 
   const [sports, setSports] = useState([{ id: 'nfl', label: 'NFL' }]);
   const [weeks, setWeeks] = useState(null);
@@ -58,7 +63,7 @@ export default function Board() {
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setData((d) => ({ ...d, loading: true, error: null, locked: false }));
-    const path = season ? `/api/boards/${season}/${week}?sport=${sport}` : `/api/boards/current?sport=${sport}`;
+    const path = season ? `/api/boards/${season}/${week}?sport=${sport}&book=${book}` : `/api/boards/current?sport=${sport}&book=${book}`;
     try {
       const { board, odds } = await api.get(path);
       setData((d) => {
@@ -72,7 +77,7 @@ export default function Board() {
       if (quiet) return; // keep showing the last good data; the freshness bar tells the story
       setData({ loading: false, error: err, locked: err.status === 402 });
     }
-  }, [season, week, sport]);
+  }, [season, week, sport, book]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -126,7 +131,7 @@ export default function Board() {
     <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-8">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-win-text">Edge Board · Kalshi &amp; DraftKings alt lines</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-win-text">Edge Board · {bookLabel(book)}</p>
           <h1 className="mt-1 text-2xl font-bold text-white sm:text-3xl">
             {board ? `${board.season} Week ${board.week}` : season ? `Week ${week}` : 'This week'}
             {history && <span className="ml-2 align-middle text-sm font-medium text-muted">archive</span>}
@@ -139,7 +144,14 @@ export default function Board() {
       <div className="mt-5 flex flex-col gap-2">
         <ChipRow label="Sport" items={sports} value={sport} onChange={setSport} />
         <ChipRow label="Market" items={MARKETS} value={market} onChange={setMarket} />
+        <ChipRow label="Sportsbook" items={BOOKS.map((b) => ({ id: b.key, label: b.label }))} value={book} onChange={chooseBook} />
       </div>
+      {!user?.book && (
+        <div className="card mt-3 border-win/40 p-4 text-sm">
+          <div className="font-semibold text-white">Which sportsbook do you use?</div>
+          <p className="mt-0.5 text-muted">Pick your book above and the board will only show lines you can actually bet. You can change it anytime. Showing {bookLabel(DEFAULT_BOOK)} for now.</p>
+        </div>
+      )}
 
       <WeekPicker weeks={weeks} active={board ?? (season && { season, week })} sport={sport} />
 
@@ -360,6 +372,7 @@ function WeekPicker({ weeks, active, sport }) {
 }
 
 function SampleNote({ bet }) {
+  if (!bet.sampleSize) return null;
   const small = bet.sampleSize > 0 && bet.sampleSize < SMALL_SAMPLE;
   return (
     <span className={`text-[11px] ${small ? 'text-warn' : 'text-muted-dim'}`} title={small ? 'Small sample — potential noise' : `Based on ${bet.sampleSize} games`}>
@@ -419,7 +432,7 @@ function BetTable({ rows, sort, onSort, history }) {
               <Th k="matchup" sort={sort} onSort={onSort}>Matchup</Th>
               <Th>Market · Bet</Th>
               <Th k="odds" sort={sort} onSort={onSort} right>{history ? 'Locked odds' : 'Odds'}</Th>
-              <Th k="prob" sort={sort} onSort={onSort} right>Est. prob</Th>
+              <Th k="prob" sort={sort} onSort={onSort} right>Fair prob</Th>
               <Th right>Fair odds</Th>
               <Th k="edge" sort={sort} onSort={onSort} right>Edge</Th>
               {history ? <Th right>CLV</Th> : <Th k="updated" sort={sort} onSort={onSort}>Updated</Th>}
@@ -488,7 +501,7 @@ function BetCards({ rows, history }) {
             </div>
             <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
               <div><dt className="text-muted-dim">{history ? 'Locked' : 'Odds'}</dt><dd><OddsCell bet={b} history={history} /></dd></div>
-              <div><dt className="text-muted-dim">Est. prob</dt><dd className="font-semibold tabular-nums text-white">{pct(b.blended)} <SampleNote bet={b} /></dd></div>
+              <div><dt className="text-muted-dim">Fair prob</dt><dd className="font-semibold tabular-nums text-white">{pct(b.blended)} <SampleNote bet={b} /></dd></div>
               <div><dt className="text-muted-dim">Fair odds</dt><dd className="font-semibold tabular-nums text-slate-300">{formatOdds(fairOdds(b.blended))}</dd></div>
             </dl>
             <div className="mt-3 flex items-center justify-between border-t border-ink-700 pt-2">
@@ -511,8 +524,8 @@ function Methodology({ history }) {
     <details className="mt-5 text-xs leading-relaxed text-muted-dim">
       <summary className="cursor-pointer font-medium text-muted">What these columns mean</summary>
       <div className="mt-2 space-y-1.5">
-        <p><b className="text-muted">Est. prob</b> is our proprietary estimate of how often this exact line wins, built from real game results. It is an estimate, not a guarantee. <span className="text-warn">●</span> flags small samples, which are noisier.</p>
-        <p><b className="text-muted">Fair odds</b> converts that probability to American odds. <b className="text-muted">Edge</b> is the estimate minus the probability implied by the price, with fees included.</p>
+        <p><b className="text-muted">Fair prob</b> is our estimate of the line's true chance of winning, derived from sharp market consensus. It is an estimate, not a guarantee.</p>
+        <p><b className="text-muted">Fair odds</b> converts that probability to American odds. <b className="text-muted">Edge</b> is the fair probability minus the probability implied by your sportsbook's price. A positive edge means your book is offering a better price than the market thinks the bet deserves.</p>
         <p><b className="text-warn">Volatile</b> marks touchdown and interception props. They can swing on a single play, so they are shown for reference but are <b className="text-muted">not included in any Edge Finder record, ROI, CLV or summary stat</b>.</p>
         <p>Lines on the same side of a game are correlated; “Best line per side” keeps just one. ⚠ marks games with a recent starting-QB change.</p>
         {history && <p><b className="text-muted">Locked odds</b> is the price when the bet first qualified; results and ROI are graded at that price. <b className="text-muted">CLV</b> is the closing implied probability minus the locked implied probability — positive means the market moved your way.</p>}
@@ -539,7 +552,7 @@ function LockedCard({ error }) {
 function VenueTag({ venue }) {
   if (!venue) return null;
   const k = venue === 'kalshi';
-  return <span className={`rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide ${k ? 'bg-[#1d3b5c] text-[#8cc4ff]' : 'bg-ink-700 text-muted'}`}>{k ? 'Kalshi' : 'DK'}</span>;
+  return <span className={`rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide ${k ? 'bg-[#1d3b5c] text-[#8cc4ff]' : 'bg-ink-700 text-muted'}`}>{bookLabel(venue)}</span>;
 }
 
 /**

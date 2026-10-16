@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { betLabel, closingLineValue, formatOdds } from '../../shared/edge.js';
 import { api, pct, signedPct, units } from '../lib/api.js';
+import { useAuth } from '../lib/auth.jsx';
+import { DEFAULT_BOOK, bookLabel } from '../../shared/books.js';
 import { Alert, ResultBadge, Spinner } from '../components/ui.jsx';
 
 const TABS = [
@@ -9,11 +11,12 @@ const TABS = [
 ];
 
 export default function Reports() {
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('live');
 
-  useEffect(() => { api.get('/api/reports').then(setData).catch((e) => setError(e.message)); }, []);
+  useEffect(() => { api.get(`/api/reports?book=${user?.book || DEFAULT_BOOK}`).then(setData).catch((e) => setError(e.message)); }, [user?.book]);
 
   if (error) return <div className="mx-auto max-w-5xl px-4 py-8"><Alert>{error}</Alert></div>;
   if (!data) return <div className="grid min-h-[50vh] place-items-center"><Spinner /></div>;
@@ -22,7 +25,7 @@ export default function Reports() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-      <h1 className="text-2xl font-bold text-white sm:text-3xl">Results &amp; ROI</h1>
+      <h1 className="text-2xl font-bold text-white sm:text-3xl">Results &amp; ROI <span className="text-base font-medium text-muted">at {bookLabel(data.book)}</span></h1>
       <div className="mt-4 inline-flex rounded-xl border border-ink-700 bg-ink-850 p-1" role="tablist">
         {TABS.map((t) => (
           <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}
@@ -48,6 +51,11 @@ export default function Reports() {
       {!isBacktest && data.volatile && data.volatile.wins + data.volatile.losses > 0 && (
         <p className="mt-6 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-warn">
           Volatile props (touchdowns, interceptions), shown separately and not part of the record: {data.volatile.wins}-{data.volatile.losses}, {units(data.volatile.units)} ({signedPct(data.volatile.roi)} ROI).
+        </p>
+      )}
+      {!isBacktest && data.retired && data.retired.wins + data.retired.losses > 0 && (
+        <p className="mt-3 rounded-xl border border-ink-600 bg-ink-850 px-4 py-3 text-sm text-muted">
+          Retired method (historical hit rates, replaced by market-based fair prices): {data.retired.wins}-{data.retired.losses}, {units(data.retired.units)} ({signedPct(data.retired.roi)} ROI). Kept on the record, not mixed into the stats above.
         </p>
       )}
       {!isBacktest && <Opportunities list={data.opportunities} />}

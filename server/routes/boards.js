@@ -8,6 +8,7 @@ import { HttpError, requireEntitlement } from '../auth.js';
 import { loadBoard, officialRecord, recordsByBoard, toBoard, trackedRows } from '../boards.js';
 import { oddsStatus } from '../odds.js';
 import { freshen } from '../background.js';
+import { DEFAULT_BOOK, isBook } from '../../shared/books.js';
 import { track } from '../funnel.js';
 import rateLimit from 'express-rate-limit';
 
@@ -48,7 +49,7 @@ router.get('/preview', async (_req, res) => {
     `select * from boards where status = 'published' and kind = 'live' and sport = 'nfl' order by season desc, week desc limit 1`);
   res.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
   if (!row) return res.json({ board: null });
-  const board = await loadBoard(row);
+  const board = await loadBoard(row, { book: DEFAULT_BOOK });
   const official = bestPerSide(board.bets.filter((b) => !b.volatile && b.odds >= row.odds_min && b.odds <= row.odds_max))
     .sort((a, b) => b.edge - a.edge);
   const group = (b) => (b.market === 'prop' ? PROP_GROUPS[PROP_STATS[b.propKey]?.group] ?? 'Props' : b.market === 'spread' ? 'Alt spread' : 'Alt total');
@@ -102,6 +103,11 @@ router.get('/boards', requireEntitlement('board'), async (req, res) => {
   });
 });
 
+const bookParam = (req) => {
+  const b = String(req.query.book || req.user?.book || DEFAULT_BOOK);
+  return isBook(b) ? b : DEFAULT_BOOK;
+};
+
 async function sendBoard(req, res, row) {
   if (!row) throw new HttpError(404, 'No board published yet');
   const boards = await liveBoards(row.sport);
@@ -109,9 +115,10 @@ async function sendBoard(req, res, row) {
   if (!isCurrent && !can(req.access, 'history')) {
     throw new HttpError(402, 'Past boards are included with Edge Finder Pro', { entitlement: 'history' });
   }
-  const [board, odds] = await Promise.all([loadBoard(row, { view: isCurrent ? 'current' : 'history' }), oddsStatus()]);
+  const book = bookParam(req);
+  const [board, odds] = await Promise.all([loadBoard(row, { view: isCurrent ? 'current' : 'history', book }), oddsStatus()]);
   res.set('Cache-Control', 'private, no-store');
-  res.json({ board: { ...board, isCurrent }, odds });
+  res.json({ board: { ...board, isCurrent, book }, odds });
 }
 
 router.get('/boards/current', requireEntitlement('board'), async (req, res) => {
@@ -134,9 +141,10 @@ router.get('/boards/:season/:week', requireEntitlement('board'), async (req, res
 });
 
 /** Tracked-opportunity reporting. Real results and backtests are computed and returned separately. */
-router.get('/reports', requireEntitlement('reports'), async (_req, res) => {
+router.get('/reports', requireEntitlement('reports'), async (req, res) => {
+  const book = bookParam(req);
   const build = async (kind) => {
-    const rows = await trackedRows(kind);
+    const rows = await trackedRows(kind, kind === 'live' ? { book } : { model: 'hitrate', book: null });
     const byWeek = new Map();
     const byMarket = new Map();
     for (const r of rows) {
@@ -154,20 +162,27 @@ router.get('/reports', requireEntitlement('reports'), async (_req, res) => {
       byMarket: [...byMarket].map(([market, list]) => ({ market, ...summarizeTracked(list) })),
     };
   };
-  const [live, backtest, volatileRows] = await Promise.all([build('live'), build('backtest'), trackedRows('live', { volatile: 'only' })]);
+  const [live, backtest, volatileRows, retiredRows] = await Promise.all([
+    build('live'), build('backtest'), trackedRows('live', { volatile: 'only', book }), trackedRows('live', { model: 'hitrate', book: null }),
+  ]);
 
   const { rows: recent } = await query(
     `select b.id, b.market, b.prop_key, b.selection, b.line, b.qualified_at, b.qualified_odds, b.qualified_prob, b.qualified_edge,
             b.closing_odds, b.result, g.label as game, bd.season, bd.week, bd.sport
        from bets b join boards bd on bd.id = b.board_id join games g on g.id = b.game_id
       where bd.kind = 'live' and bd.status = 'published' and b.qualified_at is not null
+        and b.model = 'fair' and b.venue = $1
       order by b.qualified_at desc limit 200`,
+    [book],
   );
   res.json({
     live,
     backtest,
     // Shown for transparency only: never part of the record above.
     volatile: summarizeTracked(volatileRows),
+    book,
+    // Picks made by the original hit-rate method before it was retired. Kept on the record, shown separately.
+    retired: summarizeTracked(retiredRows),
     opportunities: recent.map((r) => ({
       id: r.id, game: r.game, market: r.market, selection: r.selection, line: r.line, sport: r.sport,
       season: r.season, week: r.week, qualifiedAt: r.qualified_at, qualifiedOdds: r.qualified_odds,
