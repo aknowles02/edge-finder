@@ -231,3 +231,17 @@ create table if not exists user_bets (
   placed_at     timestamptz not null default now()
 );
 create index if not exists user_bets_user_idx on user_bets (user_id, placed_at desc);
+
+-- ── v10: live arbitrage scanner (research) ───────────────────────────────────────
+create table if not exists arbs (
+  key         text primary key,            -- game|market|number|bookA|bookB
+  game_id     bigint references games (id) on delete cascade,
+  game_label  text not null,
+  leg_a       text not null,
+  leg_b       text not null,
+  margin      numeric(6, 4) not null,      -- guaranteed return on total stake
+  best_margin numeric(6, 4) not null,
+  first_seen  timestamptz not null default now(),
+  last_seen   timestamptz not null default now(),
+  alerted_at  timestamptz
+);

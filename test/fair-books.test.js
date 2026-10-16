@@ -83,3 +83,16 @@ test('Pinnacle no-vig fair price is used when available', () => {
   assert.ok(fd.edge > 0.03, 'FanDuel -120 vs fair ~58% is a stale-line edge');
   assert.ok(!rows.some((r) => r.book === 'pinnacle'), 'Pinnacle is the reference, never a pick');
 });
+
+import { findArbs } from '../server/arbs.js';
+test('finds guaranteed arbitrage across books, never inside one book', () => {
+  const g = { away: 'BUF', home: 'MIA', label: 'BUF @ MIA' };
+  const payload = { bookmakers: [
+    { key: 'fanduel', markets: [{ key: 'spreads', outcomes: [{ name: 'Buffalo Bills', point: 3.5, price: 110 }, { name: 'Miami Dolphins', point: -3.5, price: -130 }] }] },
+    { key: 'betmgm', markets: [{ key: 'spreads', outcomes: [{ name: 'Miami Dolphins', point: -3.5, price: 105 }] }] },
+    { key: 'pinnacle', markets: [{ key: 'spreads', outcomes: [{ name: 'Miami Dolphins', point: -3.5, price: 200 }] }] },
+  ] };
+  const arbs = findArbs(payload, [], g);
+  assert.equal(arbs.length, 1, 'FanDuel BUF +3.5 (+110) vs BetMGM MIA -3.5 (+105); Pinnacle ignored');
+  assert.ok(Math.abs(arbs[0].margin - (1 - (1 / 2.1 + 1 / 2.05))) < 1e-9);
+});

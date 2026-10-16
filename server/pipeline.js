@@ -17,6 +17,7 @@ import { refreshDraftKings } from './odds.js';
 import { alertAdminsOfErrors, alertBoardOnce } from './alerts.js';
 import { bookCadenceMs, fastCadenceMs, fastWindowMs, fetchEventOdds, listEvents, scoreEventOdds, scoreKalshiAsBook } from './books.js';
 import { sendAdminAlert } from './email.js';
+import { findArbs, recordArbs } from './arbs.js';
 import { config } from './config.js';
 import { actionProb, fitGame, propFair, residualModels } from './fair.js';
 import { MIN_QUALIFY_EDGE } from '../shared/books.js';
@@ -349,6 +350,7 @@ export async function refreshBooks({ ladders, games, force = false } = {}) {
     const r = await upsertBookLines(g, scored);
     out.sportsbooks += r.stored; out.moved += r.moved;
     out.alerts = (out.alerts ?? 0) + await alertStaleLines(g).catch((err) => { console.error('[stale alert]', err); return 0; });
+    out.arbs = (out.arbs ?? 0) + await recordArbs(g, findArbs(data, kalshi, g, g.sport)).catch((err) => { console.error('[arbs]', err); return 0; });
     // Count-only profile of what each book is offering vs fair value (no picks or prices).
     out.byBook ??= {};
     for (const x of scored) {
