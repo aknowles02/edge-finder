@@ -269,8 +269,19 @@ export async function refreshBooks({ ladders, games, force = false } = {}) {
     out.credits = remaining ?? out.credits;
     await query('update games set odds_event_id = $1, book_checked_at = now() where id = $2', [ev.id, g.id]);
     if (!data) continue;
-    const r = await upsertBookLines(g, scoreEventOdds(data, g, kalshi, models, g.sport));
+    const scored = scoreEventOdds(data, g, kalshi, models, g.sport);
+    const r = await upsertBookLines(g, scored);
     out.sportsbooks += r.stored; out.moved += r.moved;
+    // Count-only profile of what each book is offering vs fair value (no picks or prices).
+    out.byBook ??= {};
+    for (const x of scored) {
+      const b = (out.byBook[x.book] ??= { lines: 0, edge1: 0, edge1Window: 0, edge3: 0, best: 0 });
+      b.lines++;
+      if (x.edge >= 0.01) b.edge1++;
+      if (x.edge >= 0.03) b.edge3++;
+      if (x.edge >= 0.01 && x.odds >= -500 && x.odds <= -200) b.edge1Window++;
+      b.best = Math.max(b.best, Math.round(x.edge * 1000) / 10);
+    }
   }
   return out;
 }
