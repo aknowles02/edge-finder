@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, Broadcast, CaretDown, ChartLineUp, Crosshair, LockKey, Scales, SealCheck,
+  ArrowRight, Broadcast, CaretDown, ChartLineUp, Crosshair, LockKey, Pulse, Scales, SealCheck,
 } from '@phosphor-icons/react';
 import { ENTITLEMENTS, PLANS, TRIAL_DAYS, priceLabel } from '../../shared/plans.js';
 import { api, timeAgo } from '../lib/api.js';
@@ -270,6 +270,7 @@ const PROOF = [
   [SealCheck, 'Locked at the price you saw', 'Results and ROI use the price when the line first qualified. No re-pricing, no deleting losers.'],
   [ChartLineUp, 'Closing line value on every bet', 'See whether the market moved toward each pick before kickoff, the sharpest signal there is.'],
   [Scales, 'Backtests kept separate', 'Hypothetical results live on their own tab and never touch the real record.'],
+  [Pulse, 'Volatile props kept out', 'Touchdown and interception props are shown with a warning but never counted in the record. One play decides them.'],
 ];
 
 function TrackRecord({ record }) {

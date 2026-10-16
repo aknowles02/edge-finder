@@ -1,4 +1,5 @@
 import { summarize, summarizeTracked } from '../shared/edge.js';
+import { VOLATILE_PROPS } from '../shared/props.js';
 import { query } from './db.js';
 import { refreshIntervalMs } from './odds.js';
 
@@ -29,6 +30,7 @@ function toBet(r, model = false) {
     blended: r.blended, implied: r.implied, edge: r.edge, sampleSize: r.sample_size,
     oddsUpdatedAt: r.odds_updated_at ?? r.created_at, lineMovedAt: r.line_moved_at,
     lineStatus: r.line_status, liveTracked: s.tracked, stale: s.stale, venue: r.venue, flags: r.flags,
+    volatile: VOLATILE_PROPS.includes(r.prop_key),
     propKey: r.prop_key, player: r.player,
     qualifiedAt: r.qualified_at, qualifiedOdds: r.qualified_odds, qualifiedProb: r.qualified_prob, qualifiedEdge: r.qualified_edge,
     closingOdds: r.closing_odds, result: r.result,
@@ -74,13 +76,18 @@ export async function qualifyBets(db, boardId) {
   return rowCount;
 }
 
-async function trackedRows(kind, { boardId } = {}) {
+/**
+ * Tracked opportunities for stats. Volatile props (TDs, INTs) are excluded unless `volatile` is
+ * 'only' (for their own, separately labelled summary).
+ */
+async function trackedRows(kind, { boardId, volatile = 'exclude' } = {}) {
   const { rows } = await query(
-    `select b.qualified_odds, b.odds, b.result, b.closing_odds, b.market, bd.id as board_id, bd.week, bd.season, bd.sport
+    `select b.qualified_odds, b.odds, b.result, b.closing_odds, b.market, b.prop_key, bd.id as board_id, bd.week, bd.season, bd.sport
        from bets b join boards bd on bd.id = b.board_id
       where bd.status = 'published' and bd.kind = $1 and b.qualified_at is not null
-        and ($2::bigint is null or bd.id = $2)`,
-    [kind, boardId ?? null],
+        and ($2::bigint is null or bd.id = $2)
+        and (case when $4 = 'only' then coalesce(b.prop_key, '') = any($3) else coalesce(b.prop_key, '') <> all($3) end)`,
+    [kind, boardId ?? null, VOLATILE_PROPS, volatile],
   );
   return rows.map((r) => ({ ...r, qualifiedOdds: r.qualified_odds, closingOdds: r.closing_odds }));
 }

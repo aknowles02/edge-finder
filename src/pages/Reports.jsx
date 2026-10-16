@@ -35,7 +35,7 @@ export default function Reports() {
       <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${isBacktest ? 'border-warn/40 bg-warn/10 text-warn' : 'border-win/40 bg-win/10 text-win-text'}`}>
         {isBacktest
           ? 'Hypothetical. Backtests apply today’s method to past games after the fact. They were never published or bettable, and are not part of our record.'
-          : 'Real, published opportunities only. Each bet is locked the moment it first qualifies and graded at that price — nothing is removed or re-priced afterwards.'}
+          : 'Real, published opportunities only. Each bet is locked the moment it first qualifies and graded at that price; nothing is removed or re-priced afterwards. Touchdown and interception props are excluded from these stats because they are too volatile.'}
       </div>
 
       <Summary s={r.summary} />
@@ -45,6 +45,11 @@ export default function Reports() {
         <Breakdown title="By market" rows={r.byMarket} label={(x) => ({ spread: 'Alt spreads', total: 'Alt totals', prop: 'Player props' }[x.market] ?? x.market)} />
       </div>
 
+      {!isBacktest && data.volatile && data.volatile.wins + data.volatile.losses > 0 && (
+        <p className="mt-6 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-warn">
+          Volatile props (touchdowns, interceptions), shown separately and not part of the record: {data.volatile.wins}-{data.volatile.losses}, {units(data.volatile.units)} ({signedPct(data.volatile.roi)} ROI).
+        </p>
+      )}
       {!isBacktest && <Opportunities list={data.opportunities} />}
     </div>
   );
@@ -121,7 +126,7 @@ function Opportunities({ list }) {
                 return (
                   <tr key={o.id}>
                     <td className="whitespace-nowrap px-4 py-2 text-xs text-muted">{new Date(o.qualifiedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
-                    <td className="whitespace-nowrap px-3 py-2"><span className="text-muted">{o.game} · </span><span className="font-semibold text-white">{betLabel(o)}</span></td>
+                    <td className="whitespace-nowrap px-3 py-2"><span className="text-muted">{o.game} · </span><span className="font-semibold text-white">{betLabel(o)}</span>{o.volatile && <span className="ml-2 rounded bg-warn/15 px-1.5 py-px text-[10px] font-semibold text-warn">Volatile · not in stats</span>}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatOdds(o.qualifiedOdds)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-win-text">{signedPct(o.qualifiedEdge)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-300">{o.closingOdds != null ? formatOdds(o.closingOdds) : '—'}</td>

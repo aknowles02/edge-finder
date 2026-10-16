@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { bestPerSide, summarizeTracked } from '../../shared/edge.js';
-import { PROP_GROUPS, PROP_STATS } from '../../shared/props.js';
+import { PROP_GROUPS, PROP_STATS, VOLATILE_PROPS } from '../../shared/props.js';
 import { SPORTS } from '../../shared/sports.js';
 import { can, canSport } from '../../shared/plans.js';
 import { query } from '../db.js';
@@ -49,7 +49,7 @@ router.get('/preview', async (_req, res) => {
   res.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
   if (!row) return res.json({ board: null });
   const board = await loadBoard(row);
-  const official = bestPerSide(board.bets.filter((b) => b.odds >= row.odds_min && b.odds <= row.odds_max))
+  const official = bestPerSide(board.bets.filter((b) => !b.volatile && b.odds >= row.odds_min && b.odds <= row.odds_max))
     .sort((a, b) => b.edge - a.edge);
   const group = (b) => (b.market === 'prop' ? PROP_GROUPS[PROP_STATS[b.propKey]?.group] ?? 'Props' : b.market === 'spread' ? 'Alt spread' : 'Alt total');
   const lastMove = board.bets.reduce((m, b) => (b.lineMovedAt && (!m || b.lineMovedAt > m) ? b.lineMovedAt : m), null);
@@ -154,10 +154,10 @@ router.get('/reports', requireEntitlement('reports'), async (_req, res) => {
       byMarket: [...byMarket].map(([market, list]) => ({ market, ...summarizeTracked(list) })),
     };
   };
-  const [live, backtest] = await Promise.all([build('live'), build('backtest')]);
+  const [live, backtest, volatileRows] = await Promise.all([build('live'), build('backtest'), trackedRows('live', { volatile: 'only' })]);
 
   const { rows: recent } = await query(
-    `select b.id, b.market, b.selection, b.line, b.qualified_at, b.qualified_odds, b.qualified_prob, b.qualified_edge,
+    `select b.id, b.market, b.prop_key, b.selection, b.line, b.qualified_at, b.qualified_odds, b.qualified_prob, b.qualified_edge,
             b.closing_odds, b.result, g.label as game, bd.season, bd.week, bd.sport
        from bets b join boards bd on bd.id = b.board_id join games g on g.id = b.game_id
       where bd.kind = 'live' and bd.status = 'published' and b.qualified_at is not null
@@ -166,10 +166,13 @@ router.get('/reports', requireEntitlement('reports'), async (_req, res) => {
   res.json({
     live,
     backtest,
+    // Shown for transparency only: never part of the record above.
+    volatile: summarizeTracked(volatileRows),
     opportunities: recent.map((r) => ({
       id: r.id, game: r.game, market: r.market, selection: r.selection, line: r.line, sport: r.sport,
       season: r.season, week: r.week, qualifiedAt: r.qualified_at, qualifiedOdds: r.qualified_odds,
       qualifiedProb: r.qualified_prob, qualifiedEdge: r.qualified_edge, closingOdds: r.closing_odds, result: r.result,
+      volatile: VOLATILE_PROPS.includes(r.prop_key),
     })),
   });
 });

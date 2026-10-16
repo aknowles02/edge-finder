@@ -152,6 +152,11 @@ export default function Board() {
       ) : (
         <>
           <StaleNotice board={board} odds={data.odds} />
+          {(market === 'td' || (market === 'passing' && rows.some((b) => b.volatile))) && (
+            <div role="note" className="mt-4 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm text-warn">
+              Touchdown and interception props are highly volatile: one play decides them and samples are thin. They are not counted in Edge Finder's record, ROI or stats.
+            </div>
+          )}
           {history ? <HistoryStats rows={rows} /> : <SlateStats rows={rows} />}
 
           {!history && (
@@ -249,7 +254,8 @@ function Stat({ label, value, sub, tone }) {
   );
 }
 
-function SlateStats({ rows }) {
+function SlateStats({ rows: all }) {
+  const rows = all.filter((b) => !b.volatile); // TD/INT props are shown but kept out of stats
   const avg = rows.length ? rows.reduce((s, b) => s + b.edge, 0) / rows.length : null;
   const top = rows.reduce((m, b) => (!m || b.edge > m.edge ? b : m), null);
   const games = new Set(rows.map((b) => b.game)).size;
@@ -264,7 +270,7 @@ function SlateStats({ rows }) {
 }
 
 function HistoryStats({ rows }) {
-  const s = summarizeTracked(rows);
+  const s = summarizeTracked(rows.filter((b) => !b.volatile));
   const decided = s.wins + s.losses;
   return (
     <section className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Tracked results">
@@ -435,6 +441,7 @@ function BetTable({ rows, sort, onSort, history }) {
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-1.5 text-[11px] text-muted">{marketName(b)} <VenueTag venue={b.venue} /></div>
                     <div className="whitespace-nowrap font-semibold text-white">{betLabel(b)}</div>
+                    {b.volatile && <VolatileTag />}
                   </td>
                   <td className="px-3 py-3 text-right"><OddsCell bet={b} history={history} /></td>
                   <td className="px-3 py-3 text-right tabular-nums">
@@ -470,6 +477,7 @@ function BetCards({ rows, history }) {
               <div className="min-w-0">
                 <div className="text-[11px] text-muted">#{i + 1} · {b.game}{b.commenceTime && !b.started ? ` · ${kickoff(b.commenceTime)}` : ''}</div>
                 <div className="mt-0.5 font-semibold text-white">{betLabel(b)}</div>
+                {b.volatile && <VolatileTag />}
                 <div className="flex items-center gap-1.5 text-[11px] text-muted-dim">{marketName(b)} <VenueTag venue={b.venue} /></div>
                 {b.flags && <div className="text-[11px] text-warn">⚠ {b.flags}</div>}
               </div>
@@ -505,6 +513,7 @@ function Methodology({ history }) {
       <div className="mt-2 space-y-1.5">
         <p><b className="text-muted">Est. prob</b> is our proprietary estimate of how often this exact line wins, built from real game results. It is an estimate, not a guarantee. <span className="text-warn">●</span> flags small samples, which are noisier.</p>
         <p><b className="text-muted">Fair odds</b> converts that probability to American odds. <b className="text-muted">Edge</b> is the estimate minus the probability implied by the price, with fees included.</p>
+        <p><b className="text-warn">Volatile</b> marks touchdown and interception props. They can swing on a single play, so they are shown for reference but are <b className="text-muted">not included in any Edge Finder record, ROI, CLV or summary stat</b>.</p>
         <p>Lines on the same side of a game are correlated; “Best line per side” keeps just one. ⚠ marks games with a recent starting-QB change.</p>
         {history && <p><b className="text-muted">Locked odds</b> is the price when the bet first qualified; results and ROI are graded at that price. <b className="text-muted">CLV</b> is the closing implied probability minus the locked implied probability — positive means the market moved your way.</p>}
       </div>
@@ -584,5 +593,14 @@ function EdgeControl({ base, shown, minEdge, setMinEdge, sort, setSort }) {
       </div>
       <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted-dim"><span>0%</span><span>{max / 2}%</span><span>{max}%+</span></div>
     </section>
+  );
+}
+
+function VolatileTag() {
+  return (
+    <span className="mt-0.5 inline-block rounded bg-warn/15 px-1.5 py-px text-[10px] font-semibold text-warn"
+      title="Touchdown/INT props swing on a single play. Not included in Edge Finder stats.">
+      Volatile · not in stats
+    </span>
   );
 }

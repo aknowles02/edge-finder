@@ -60,3 +60,10 @@ export function gradeProp(row, statKey, line, side) {
 
 /** "Tanner McKee Pass Yds Over" — the board's selection text (rungs on the same side share it). */
 export const propSelection = (player, statKey, side) => `${player} ${PROP_STATS[statKey].label} ${side}`;
+
+/**
+ * Touchdown and interception props hinge on one or two plays, so they're shown on the board with a
+ * volatility warning but excluded from every Edge Finder record, ROI and CLV statistic.
+ */
+export const VOLATILE_PROPS = ['any_td', 'pass_tds', 'pass_int'];
+export const isVolatile = (b) => VOLATILE_PROPS.includes(b.propKey ?? b.prop_key);
