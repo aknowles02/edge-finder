@@ -1,4 +1,5 @@
-import { Link, NavLink } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { PLANS, priceLabel } from '../../shared/plans.js';
 import { daysLeft, useAuth } from '../lib/auth.jsx';
 import { Logo } from './ui.jsx';
@@ -22,8 +23,22 @@ function TrialBanner({ user }) {
   );
 }
 
+// Anonymous page-view count (path + referring site only). No cookies, no identifiers.
+function usePageBeacon() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    try {
+      const body = JSON.stringify({ path: pathname, ref: document.referrer || '' });
+      if (!navigator.sendBeacon?.('/api/e', new Blob([body], { type: 'application/json' }))) {
+        fetch('/api/e', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+      }
+    } catch { /* never block the page */ }
+  }, [pathname]);
+}
+
 export default function Layout({ children }) {
   const { user } = useAuth();
+  usePageBeacon();
   const has = (e) => user?.entitlements?.includes(e);
   return (
     <div className="flex min-h-dvh flex-col">

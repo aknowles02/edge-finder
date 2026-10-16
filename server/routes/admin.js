@@ -8,7 +8,9 @@ import { HttpError, requireAdmin } from '../auth.js';
 import { loadBoard, qualifyBets, toBoard } from '../boards.js';
 import { oddsStatus } from '../odds.js';
 import { runPipeline } from '../pipeline.js';
-import { sendBoardAlert } from '../email.js';
+import { funnelReport } from '../funnel.js';
+import { importBacktest } from '../backtest.js';
+import { alertBoardOnce } from '../alerts.js';
 
 const router = Router();
 router.use('/admin', requireAdmin);
@@ -111,23 +113,7 @@ router.post('/admin/boards/:id/publish', async (req, res) => {
   );
   const qualified = await qualifyBets({ query }, board.id);
 
-  let alerted = 0;
-  if (req.body?.notify && !updated.alerted_at) {
-    const { rows: recipients } = await query(
-      `select email from users
-        where alerts_opt_in and subscription_status in ('active', 'trialing', 'past_due')
-          and coalesce(plan_id, 'pro') = any($1)
-          and (current_period_end is null or current_period_end > now())`,
-      [Object.values(PLANS).filter((p) => p.entitlements.includes('alerts')).map((p) => p.id)],
-    );
-    const { rows: [{ count }] } = await query('select count(*)::int as count from bets where board_id = $1 and edge > 0', [board.id]);
-    await sendBoardAlert(recipients.map((r) => r.email), {
-      season: updated.season, week: updated.week, count,
-      url: `${config.appUrl()}/board`,
-    });
-    await query('update boards set alerted_at = now() where id = $1', [board.id]);
-    alerted = recipients.length;
-  }
+  const alerted = req.body?.notify ? await alertBoardOnce(board.id) : 0;
   res.json({ board: toBoard(updated), alerted, qualified });
 });
 
@@ -192,6 +178,14 @@ router.patch('/admin/bets/:id', async (req, res) => {
   );
   if (!rowCount) throw new HttpError(404, 'Bet not found');
   res.json({ ok: true });
+});
+
+
+router.get('/admin/funnel', async (_req, res) => res.json(await funnelReport(14)));
+
+/** Load the bundled point-in-time backtest (data/backtest-<season>.json) as a backtest board. Admin only. */
+router.post('/admin/backtest/import', async (req, res) => {
+  res.json(await importBacktest(Number(req.body?.season || 2025)));
 });
 
 export default router;

@@ -56,3 +56,14 @@ export async function sendBoardAlert(emails, { season, week, count, url }) {
     })));
   }
 }
+
+export async function sendAdminAlert(emails, subject, lines) {
+  await resend('/emails', {
+    from: config.emailFrom(),
+    to: emails,
+    subject,
+    text: `${lines.join('\n')}\n\nAdmin: ${config.appUrl()}/admin`,
+    html: layout(subject, `<ul style="color:#E07A70;line-height:1.6">${lines.map((l) => `<li>${String(l).replace(/[<>&]/g, '')}</li>`).join('')}</ul>
+      <p style="margin:28px 0"><a href="${config.appUrl()}/admin" style="color:#4CC98A">Open admin</a></p>`),
+  });
+}

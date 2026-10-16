@@ -8,6 +8,8 @@ import { HttpError, requireEntitlement } from '../auth.js';
 import { loadBoard, officialRecord, recordsByBoard, toBoard, trackedRows } from '../boards.js';
 import { oddsStatus } from '../odds.js';
 import { freshen } from '../background.js';
+import { track } from '../funnel.js';
+import rateLimit from 'express-rate-limit';
 
 const router = Router();
 
@@ -68,6 +70,17 @@ router.get('/preview', async (_req, res) => {
       })),
     },
   });
+});
+
+const beaconLimit = rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: false, legacyHeaders: false });
+/** Page-view beacon. Only the path and the referring site's host are kept, as daily counts. */
+router.post('/e', beaconLimit, (req, res) => {
+  const path = String(req.body?.path ?? '').split('?')[0];
+  let ref = '';
+  try { ref = req.body?.ref ? new URL(req.body.ref).host : ''; } catch { /* ignore */ }
+  if (ref && req.get('host') && ref === req.get('host')) ref = '';
+  track('view', { path, ref });
+  res.status(204).end();
 });
 
 router.get('/sports', (_req, res) => {

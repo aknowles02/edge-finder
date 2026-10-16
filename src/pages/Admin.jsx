@@ -19,6 +19,8 @@ export default function Admin() {
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6">
       <h1 className="text-2xl font-bold text-white">Admin</h1>
       <OddsPanel odds={odds} onChange={setOdds} onLoad={load} />
+      <FunnelPanel />
+      <BacktestPanel onDone={load} />
       <ImportForm onDone={load} />
       <section className="card overflow-hidden">
         <h2 className="border-b border-ink-700 px-5 py-4 font-semibold text-white">Boards</h2>
@@ -285,6 +287,57 @@ function OddsPanel({ odds, onChange, onLoad }) {
         </button>
         <button type="button" className="btn-primary" disabled={busy} onClick={() => refresh(true)}>Build this week now</button>
       </div>
+    </section>
+  );
+}
+
+function FunnelPanel() {
+  const [f, setF] = useState(null);
+  useEffect(() => { api.get('/api/admin/funnel').then(setF).catch(() => {}); }, []);
+  if (!f) return null;
+  const t = f.totals;
+  const steps = [['Page views', t.view], ['Sign-in links sent', t.signup_start], ['New accounts', t.signup], ['Checkouts started', t.checkout], ['Subscribed', t.subscribe], ['Cancelled', t.cancel]];
+  return (
+    <section className="card p-5">
+      <h2 className="font-semibold text-white">Last {f.days} days</h2>
+      <p className="mt-1 text-xs text-muted">Anonymous daily counts. No cookies or personal data.</p>
+      <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-6">
+        {steps.map(([k, v]) => (
+          <div key={k} className="rounded-xl border border-ink-700 p-3"><dt className="text-[11px] text-muted">{k}</dt><dd className="mt-1 text-xl font-bold tabular-nums text-white">{v ?? 0}</dd></div>
+        ))}
+      </dl>
+      {(f.refs.length > 0 || f.pages.length > 0) && (
+        <div className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
+          <div><div className="label">Top pages</div>{f.pages.map((p) => <div key={p.path} className="flex justify-between text-muted"><span>{p.path || '/'}</span><span className="tabular-nums">{p.n}</span></div>)}</div>
+          <div><div className="label">Referrers</div>{f.refs.map((r) => <div key={r.ref} className="flex justify-between text-muted"><span>{r.ref}</span><span className="tabular-nums">{r.n}</span></div>)}</div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function BacktestPanel({ onDone }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  async function run() {
+    if (!window.confirm('Load the 2025 point-in-time backtest? It will appear on the Backtests tab of Results for Pro members, clearly labeled hypothetical.')) return;
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.post('/api/admin/backtest/import', { season: 2025 });
+      const s = r.summary;
+      setMsg(`Loaded ${r.bets} bets over ${r.weeks} weeks: ${s.wins}-${s.losses}, ${s.units > 0 ? '+' : ''}${s.units}u (${(s.roi * 100).toFixed(1)}% ROI).`);
+      onDone?.();
+    } catch (err) { setMsg(err.message); }
+    setBusy(false);
+  }
+  return (
+    <section className="card flex flex-wrap items-center justify-between gap-4 p-5">
+      <div className="text-sm">
+        <h2 className="font-semibold text-white">2025 backtest</h2>
+        <p className="mt-1 text-muted">Point-in-time test of the current method on Kalshi's 2025 alt ladders (spreads and totals). Hidden until you load it.</p>
+        {msg && <p className="mt-1 text-slate-200">{msg}</p>}
+      </div>
+      <button type="button" className="btn-ghost" disabled={busy} onClick={run}>{busy ? <Spinner className="h-4 w-4" /> : 'Load into Results'}</button>
     </section>
   );
 }

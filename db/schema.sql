@@ -183,3 +183,13 @@ create table if not exists pipeline_state (
 alter table bets add column if not exists prop_key text;   -- shared/props.js key, e.g. pass_yds
 alter table bets add column if not exists player text;     -- player display name (props only)
 alter table bets add column if not exists prop_side text;  -- Over | Under
+
+-- ── v5: cookie-free first-party funnel stats (no IPs, no user ids, no cookies) ────
+create table if not exists funnel_daily (
+  day   date not null default current_date,
+  kind  text not null,   -- view | signup_start | signup | checkout | subscribe | cancel
+  path  text not null default '',
+  ref   text not null default '',
+  count int  not null default 0,
+  primary key (day, kind, path, ref)
+);

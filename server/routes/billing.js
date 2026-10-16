@@ -4,6 +4,7 @@ import { DEFAULT_PLAN, PLANS, priceLabel } from '../../shared/plans.js';
 import { config } from '../config.js';
 import { query } from '../db.js';
 import { HttpError, accessFor, requireUser } from '../auth.js';
+import { track } from '../funnel.js';
 
 const router = Router();
 let stripe;
@@ -74,6 +75,7 @@ router.post('/billing/cancel', requireUser, async (req, res) => {
   const subs = await activeSubscriptions(req.user.stripe_customer_id);
   if (!subs.length) throw new HttpError(400, 'No active subscription');
   for (const sub of subs) await syncSubscription(await getStripe().subscriptions.update(sub.id, { cancel_at_period_end: true }));
+  track('cancel');
   res.json({ ok: true });
 });
 
@@ -124,6 +126,7 @@ export async function stripeWebhook(req, res) {
     case 'checkout.session.completed': {
       const s = event.data.object;
       if (s.mode === 'subscription' && s.subscription) {
+        track('subscribe');
         await syncSubscription(await getStripe().subscriptions.retrieve(s.subscription));
       }
       break;

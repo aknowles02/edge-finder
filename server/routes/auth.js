@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { query } from '../db.js';
 import { HttpError, clearSession, issueSession, publicUser, requireUser } from '../auth.js';
 import { sendMagicLink } from '../email.js';
+import { track } from '../funnel.js';
 
 const router = Router();
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -34,6 +35,7 @@ router.post('/auth/login', loginLimiter, async (req, res) => {
   const next = typeof req.body?.next === 'string' && req.body.next.startsWith('/') && !req.body.next.startsWith('//') ? req.body.next : '';
   const url = `${config.appUrl()}/auth/verify?token=${token}${next ? `&next=${encodeURIComponent(next)}` : ''}`;
   await sendMagicLink(email, url);
+  track('signup_start');
   res.json({ ok: true });
 });
 
@@ -52,9 +54,10 @@ router.post('/auth/verify', async (req, res) => {
   const { rows: users } = await query(
     `insert into users (email, last_login_at) values ($1, now())
      on conflict (email) do update set last_login_at = now()
-     returning *`,
+     returning *, (xmax = 0) as created`,
     [rows[0].email],
   );
+  if (users[0].created) track('signup');
   issueSession(res, users[0]);
   res.json({ user: publicUser(users[0]) });
 });

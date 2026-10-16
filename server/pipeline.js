@@ -14,6 +14,7 @@ import { betsFromEntry, costToAmerican, effectiveCost, fetchAllLadders, propTeam
 import { currentWeek, loadGames } from './nflverse.js';
 import { qualifyBets } from './boards.js';
 import { refreshDraftKings } from './odds.js';
+import { alertAdminsOfErrors, alertBoardOnce } from './alerts.js';
 
 const SEASON = Number(process.env.SEASON || 2026);
 const MIN_RUN_GAP_S = 90;
@@ -137,6 +138,10 @@ export async function buildWeek({ week, ladders, games, players } = {}) {
     const qualified = await qualifyBets(db, board.id);
     return { boardId: board.id, week, games: gameRows.length, bets: rowCount, published, qualified };
   });
+  // New board went live on its own: email Pro members (once per board).
+  if (result.published && process.env.AUTO_ALERTS !== '0') {
+    try { result.alerted = await alertBoardOnce(result.boardId); } catch (err) { console.error('[alerts]', err); result.alertError = err.message; }
+  }
   return result;
 }
 
@@ -307,5 +312,6 @@ export async function runPipeline({ force = false, build = false } = {}) {
     `update odds_refresh_runs set finished_at = now(), status = $2, games_checked = $3, prices_changed = $4, error = $5 where id = $1`,
     [runId, errors.length ? 'error' : 'ok', priced, moved, errors.join(' | ') || null],
   );
+  if (errors.length) await alertAdminsOfErrors(errors).catch((err) => console.error('[admin alert]', err));
   return { ...summary, errors };
 }
