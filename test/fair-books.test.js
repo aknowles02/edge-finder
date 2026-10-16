@@ -66,3 +66,20 @@ test('sportsbook cadence tightens toward kickoff', () => {
   const now = Date.now();
   assert.ok(bookCadenceMs(now + 2 * 3600e3, now) < bookCadenceMs(now + 30 * 3600e3, now));
 });
+
+import { pinnacleFair } from '../server/books.js';
+test('Pinnacle no-vig fair price is used when available', () => {
+  const g = { away: 'BUF', home: 'MIA' };
+  const pin = { key: 'pinnacle', markets: [{ key: 'alternate_spreads', outcomes: [
+    { name: 'Buffalo Bills', point: 3.5, price: -150 }, { name: 'Miami Dolphins', point: -3.5, price: 130 },
+  ] }] };
+  const fair = pinnacleFair({ bookmakers: [pin] }, g);
+  const p = fair.exact.get('spread|BUF|3.5');
+  const raw = [1 / (1 + 100 / 150), 1 / (1 + 130 / 100)];
+  assert.ok(Math.abs(p - raw[0] / (raw[0] + raw[1])) < 1e-9, 'margin removed proportionally');
+  const rows = scoreEventOdds({ bookmakers: [pin, { key: 'fanduel', markets: [{ key: 'alternate_spreads', outcomes: [{ name: 'Buffalo Bills', point: 3.5, price: -120 }] }] }] }, { ...g, commence_time: '2026-10-18T17:00:00Z' }, [], models);
+  const fd = rows.find((r) => r.book === 'fanduel');
+  assert.equal(fd.source, 'pinnacle');
+  assert.ok(fd.edge > 0.03, 'FanDuel -120 vs fair ~58% is a stale-line edge');
+  assert.ok(!rows.some((r) => r.book === 'pinnacle'), 'Pinnacle is the reference, never a pick');
+});

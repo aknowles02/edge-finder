@@ -206,3 +206,7 @@ alter table bets add column if not exists closing_fair numeric(6, 4);   -- sharp
 alter table bets add column if not exists model_version text;           -- e.g. fair-v1
 alter table bets add column if not exists edge_first_seen timestamptz;  -- edge ≥ 1% first observed
 alter table bets add column if not exists edge_last_seen timestamptz;   -- edge ≥ 1% last observed
+
+-- ── v8: live stale-line test ─────────────────────────────────────────────────────
+alter table games add column if not exists book_fast_checked_at timestamptz;
+alter table bets add column if not exists alerted_at timestamptz;   -- stale-line alert sent

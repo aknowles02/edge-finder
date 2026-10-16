@@ -30,6 +30,10 @@ export const BOOK_MARKETS = {
 };
 const DEFAULT_MARKETS = Object.keys(BOOK_MARKETS);
 
+/** Game-day stale-line watch: cheap spreads/totals pulls every 15 minutes in the last 4 hours. */
+export const fastWindowMs = 4 * HOUR;
+export const fastCadenceMs = 15 * 60_000;
+
 /** How often each game's sportsbook prices are re-pulled. Tighter near kickoff, where lines move. */
 export function bookCadenceMs(kickoffMs, now = Date.now()) {
   const until = kickoffMs - now;
@@ -54,8 +58,50 @@ function codeFor(name, game, sport) {
  * Turn one event-odds payload into scored lines, priced against Kalshi.
  * `kalshi`: this game's Kalshi ladder entries. Returns rows ready to upsert (all books).
  */
+const dec = (a) => (a > 0 ? 1 + a / 100 : 1 + 100 / -a);
+
+/**
+ * Pinnacle (the sharpest book) with its margin removed: exact no-vig probability for every line it
+ * lists, plus ladder entries so a fit can price lines it doesn't list. Null if Pinnacle isn't in the payload.
+ */
+export function pinnacleFair(eventOdds, game, sport = 'nfl') {
+  const book = eventOdds?.bookmakers?.find((b) => b.key === 'pinnacle');
+  if (!book) return null;
+  const exact = new Map(), entries = [];
+  for (const m of book.markets ?? []) {
+    const spec = BOOK_MARKETS[m.key];
+    if (!spec || spec.market === 'prop') continue;
+    const isSpread = spec.market === 'spread';
+    const out = (m.outcomes ?? []).map((o) => ({ ...o, side: isSpread ? codeFor(o.name, game, sport) : o.name, point: Number(o.point) }));
+    for (const o of out) {
+      if (!o.side || !Number.isFinite(o.point) || Number.isInteger(o.point)) continue;
+      const opp = isSpread
+        ? out.find((x) => x.side && x.side !== o.side && x.point === -o.point)
+        : out.find((x) => x.side !== o.side && x.point === o.point);
+      if (!opp) continue;
+      const p = (1 / dec(o.price)) / (1 / dec(o.price) + 1 / dec(opp.price));
+      exact.set(`${spec.market}|${o.side}|${o.point}`, p);
+      if (isSpread) entries.push({ kind: 'spread', team: o.side, strike: -o.point, yesBid: p, yesAsk: p });
+      else if (o.side === 'Over') entries.push({ kind: 'total', strike: o.point, yesBid: p, yesAsk: p });
+    }
+  }
+  return exact.size ? { exact, entries } : null;
+}
+
 export function scoreEventOdds(eventOdds, game, kalshi, models, sport = 'nfl') {
-  const fit = fitGame(kalshi.filter((e) => e.kind !== 'prop'), game, models);
+  const kalshiFit = fitGame(kalshi.filter((e) => e.kind !== 'prop'), game, models);
+  // Pinnacle no-vig is the primary fair price for spreads/totals (backtested as accurate as Kalshi and
+  // live/liquid); Kalshi's ladder fills in when Pinnacle is missing, and always prices props.
+  const pin = pinnacleFair(eventOdds, game, sport);
+  const pinFit = pin ? fitGame(pin.entries, game, models) : null;
+  const fairFor = (market, side, line) => {
+    const ex = pin?.exact.get(`${market}|${side}|${line}`);
+    if (ex != null) return { f: { win: ex, push: 0 }, source: 'pinnacle' };
+    const viaPin = pinFit && (market === 'spread' ? pinFit.spread(side, line) : pinFit.total(side, line));
+    if (viaPin) return { f: viaPin, source: 'pinnacle' };
+    const viaKalshi = market === 'spread' ? kalshiFit.spread(side, line) : kalshiFit.total(side, line);
+    return { f: viaKalshi, source: 'kalshi' };
+  };
   // Player ladders, keyed by player + stat.
   const ladders = new Map();
   for (const e of kalshi) {
@@ -74,18 +120,18 @@ export function scoreEventOdds(eventOdds, game, kalshi, models, sport = 'nfl') {
       if (!spec) continue;
       for (const o of m.outcomes ?? []) {
         if (!Number.isFinite(o.price) || Math.abs(o.price) < 100) continue;
-        let fair = null, selection, line, team = null, player = null, propSide = null;
+        let fair = null, source = 'kalshi', selection, line, team = null, player = null, propSide = null;
         if (spec.market === 'spread') {
           team = codeFor(o.name, game, sport);
           if (!team || o.point == null) continue;
           line = Number(o.point);
           selection = team;
-          fair = fit.spread(team, line);
+          ({ f: fair, source } = fairFor('spread', team, line));
         } else if (spec.market === 'total') {
           if (o.point == null || !['Over', 'Under'].includes(o.name)) continue;
           line = Number(o.point);
           selection = o.name;
-          fair = fit.total(o.name, line);
+          ({ f: fair, source } = fairFor('total', o.name, line));
         } else {
           player = o.description;
           if (!player) continue;
@@ -102,7 +148,7 @@ export function scoreEventOdds(eventOdds, game, kalshi, models, sport = 'nfl') {
         rows.push({
           book: book.key, market: spec.market, selection, line, odds, fair: p, implied, edge: p - implied,
           ref: `${book.key}|${m.key}|${norm(player ?? o.name)}|${o.name}|${line}`,
-          propKey: spec.propKey ?? null, player, propSide,
+          propKey: spec.propKey ?? null, player, propSide, source,
         });
       }
     }
@@ -133,11 +179,15 @@ export async function listEvents(sport = 'nfl') {
   return (await oddsApi(`/sports/${SPORTS[sport].oddsKey}/events`)).data ?? [];
 }
 
-/** One request for every book on one game. */
-export async function fetchEventOdds(eventId, sport = 'nfl') {
-  const markets = (process.env.ODDS_API_MARKETS || DEFAULT_MARKETS.join(',')).split(',').filter((k) => BOOK_MARKETS[k]);
+// Game-day "fast" pulls: just spreads/totals (4 credits) for catching stale lines; "full" pulls add props.
+export const FAST_MARKETS = ['spreads', 'totals', 'alternate_spreads', 'alternate_totals'];
+
+/** One request for every book (plus Pinnacle as the fair reference) on one game. */
+export async function fetchEventOdds(eventId, sport = 'nfl', { fast = false } = {}) {
+  const markets = fast ? FAST_MARKETS
+    : (process.env.ODDS_API_MARKETS || DEFAULT_MARKETS.join(',')).split(',').filter((k) => BOOK_MARKETS[k]);
   return oddsApi(`/sports/${SPORTS[sport].oddsKey}/events/${eventId}/odds`, {
-    bookmakers: BOOKS.filter((b) => b.key !== 'kalshi').map((b) => b.key).join(','),
+    bookmakers: [...BOOKS.map((b) => b.key), 'pinnacle'].join(','),
     markets: markets.join(','),
     oddsFormat: 'american',
   });

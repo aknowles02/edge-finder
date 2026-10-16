@@ -15,11 +15,15 @@ import { currentWeek, loadGames } from './nflverse.js';
 import { qualifyBets } from './boards.js';
 import { refreshDraftKings } from './odds.js';
 import { alertAdminsOfErrors, alertBoardOnce } from './alerts.js';
-import { bookCadenceMs, fetchEventOdds, listEvents, scoreEventOdds, scoreKalshiAsBook } from './books.js';
+import { bookCadenceMs, fastCadenceMs, fastWindowMs, fetchEventOdds, listEvents, scoreEventOdds, scoreKalshiAsBook } from './books.js';
+import { sendAdminAlert } from './email.js';
+import { config } from './config.js';
 import { actionProb, fitGame, propFair, residualModels } from './fair.js';
 import { MIN_QUALIFY_EDGE } from '../shared/books.js';
 
-export const FAIR_MODEL_VERSION = 'fair-v1';
+export const FAIR_MODEL_VERSION = 'fair-v1'; // Kalshi-fit fair price
+export const PIN_MODEL_VERSION = 'fair-v2-pinnacle'; // Pinnacle no-vig fair price
+const STALE_ALERT_EDGE = Number(process.env.STALE_ALERT_EDGE || 0.03);
 import { matchEvent } from './odds.js';
 
 const SEASON = Number(process.env.SEASON || 2026);
@@ -203,7 +207,8 @@ const RESERVE_CREDITS = Number(process.env.ODDS_API_MIN_CREDITS || 300);
 async function repriceStored(g, kalshi, models) {
   const { rows: lines } = await query(
     `select id, market, selection, line, odds, implied, prop_key, player, prop_side from bets
-      where game_id = $1 and model = 'fair' and line_status = 'live'`, [g.id]);
+      where game_id = $1 and model = 'fair' and line_status = 'live'
+        and coalesce(model_version, '${FAIR_MODEL_VERSION}') = '${FAIR_MODEL_VERSION}'`, [g.id]);
   if (!lines.length) return 0;
   const fit = fitGame(kalshi.filter((e) => e.kind !== 'prop'), g, models);
   const ladders = new Map();
@@ -234,6 +239,28 @@ async function repriceStored(g, kalshi, models) {
   return updates.length;
 }
 
+/**
+ * Live stale-line test: email admins the moment a sportsbook is ≥3% off Pinnacle's no-vig price on a
+ * freshly pulled line (once per line). Admin-only while we measure whether these edges are real.
+ */
+async function alertStaleLines(g) {
+  const admins = [...config.adminEmails()];
+  if (!admins.length) return 0;
+  const { rows } = await query(
+    `update bets set alerted_at = now()
+      where game_id = $1 and model = 'fair' and model_version = $2 and alerted_at is null
+        and edge >= $3 and odds_updated_at > now() - interval '5 minutes'
+        and coalesce(prop_key, '') not in ('any_td', 'pass_tds', 'pass_int')
+      returning venue, market, selection, line, odds, blended, edge`,
+    [g.id, PIN_MODEL_VERSION, STALE_ALERT_EDGE],
+  );
+  if (!rows.length) return 0;
+  const lines = rows.slice(0, 15).map((b) =>
+    `${g.label}: ${b.selection} ${b.market === 'spread' && Number(b.line) > 0 ? '+' : ''}${b.line} at ${b.venue} ${b.odds > 0 ? '+' : ''}${b.odds}, fair ${(b.blended * 100).toFixed(1)}%, edge +${(b.edge * 100).toFixed(1)}%`);
+  await sendAdminAlert(admins, `Stale line alert: ${rows.length} edge${rows.length > 1 ? 's' : ''} in ${g.label}`, lines);
+  return rows.length;
+}
+
 /** Upsert scored lines for one game (any books) and log price moves. */
 async function upsertBookLines(gameRow, rows) {
   const keep = rows.filter((r) => r.edge > -0.03); // far-negative lines are noise; skip storing them
@@ -246,12 +273,15 @@ async function upsertBookLines(gameRow, rows) {
   await query(
     `insert into bets (board_id, game_id, venue, model, model_version, external_ref, external_side, market, selection, line, odds,
                        blended, implied, edge, sample_size, line_status, odds_updated_at, prop_key, player, prop_side)
-     select $1, $2, x.book, 'fair', '${FAIR_MODEL_VERSION}', x.ref, 'book', x.market, x.selection, x.line, x.odds,
+     select $1, $2, x.book, 'fair', case when x.source = 'pinnacle' then '${PIN_MODEL_VERSION}' else '${FAIR_MODEL_VERSION}' end, x.ref, 'book', x.market, x.selection, x.line, x.odds,
             x.fair, x.implied, x.edge, 0, 'live', now(), x."propKey", x.player, x."propSide"
        from jsonb_to_recordset($3::jsonb) as x(book text, market text, selection text, line numeric, odds int, fair numeric,
-            implied numeric, edge numeric, ref text, "propKey" text, player text, "propSide" text)
+            implied numeric, edge numeric, ref text, "propKey" text, player text, "propSide" text, source text)
      on conflict (board_id, external_ref, external_side) where external_ref is not null do update
        set odds = excluded.odds, implied = excluded.implied, blended = excluded.blended, edge = excluded.edge,
+           model_version = excluded.model_version,
+           edge_first_seen = case when excluded.edge >= ${MIN_QUALIFY_EDGE} then coalesce(bets.edge_first_seen, now()) else bets.edge_first_seen end,
+           edge_last_seen = case when excluded.edge >= ${MIN_QUALIFY_EDGE} then now() else bets.edge_last_seen end,
            line_status = 'live', odds_updated_at = now(),
            line_moved_at = case when bets.odds <> excluded.odds then now() else bets.line_moved_at end`,
     [gameRow.board_id, gameRow.id, JSON.stringify(keep)],
@@ -299,20 +329,26 @@ export async function refreshBooks({ ladders, games, force = false } = {}) {
 
     if (!process.env.ODDS_API_KEY) continue;
     const kickoff = new Date(g.commence_time).getTime();
-    const due = force || !g.book_checked_at || Date.now() - new Date(g.book_checked_at).getTime() >= bookCadenceMs(kickoff) - 60_000;
-    if (!due) { out.notDue++; continue; }
+    const since = (t) => (t ? Date.now() - new Date(t).getTime() : Infinity);
+    const fullDue = force || since(g.book_checked_at) >= bookCadenceMs(kickoff) - 60_000;
+    // Stale-line watch: cheap spreads/totals pulls every 15 min in the last 4 hours before kickoff.
+    const fastDue = !fullDue && kickoff - Date.now() <= fastWindowMs
+      && Math.min(since(g.book_fast_checked_at), since(g.book_checked_at)) >= fastCadenceMs - 60_000;
+    if (!fullDue && !fastDue) { out.notDue++; continue; }
     if (out.credits != null && out.credits < RESERVE_CREDITS) { out.skipped++; continue; }
     events ??= await listEvents(g.sport);
     const ev = (g.odds_event_id && events.find((e) => e.id === g.odds_event_id)) || matchEvent(g.sport, g, events);
     if (!ev) { out.unmatched++; continue; }
-    const { data, remaining } = await fetchEventOdds(ev.id, g.sport);
+    const { data, remaining } = await fetchEventOdds(ev.id, g.sport, { fast: fastDue });
     out.fetched++;
+    if (fastDue) out.fast = (out.fast ?? 0) + 1;
     out.credits = remaining ?? out.credits;
-    await query('update games set odds_event_id = $1, book_checked_at = now() where id = $2', [ev.id, g.id]);
+    await query(`update games set odds_event_id = $1, ${fastDue ? 'book_fast_checked_at' : 'book_checked_at'} = now() where id = $2`, [ev.id, g.id]);
     if (!data) continue;
     const scored = scoreEventOdds(data, g, kalshi, models, g.sport);
     const r = await upsertBookLines(g, scored);
     out.sportsbooks += r.stored; out.moved += r.moved;
+    out.alerts = (out.alerts ?? 0) + await alertStaleLines(g).catch((err) => { console.error('[stale alert]', err); return 0; });
     // Count-only profile of what each book is offering vs fair value (no picks or prices).
     out.byBook ??= {};
     for (const x of scored) {
