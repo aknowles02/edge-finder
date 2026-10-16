@@ -16,7 +16,8 @@ export default function Reports() {
   const [error, setError] = useState('');
   const [tab, setTab] = useState('live');
 
-  useEffect(() => { api.get(`/api/reports?book=${user?.book || DEFAULT_BOOK}`).then(setData).catch((e) => setError(e.message)); }, [user?.book]);
+    const [allPrices, setAllPrices] = useState(false);
+  useEffect(() => { api.get(`/api/reports?book=${user?.book || DEFAULT_BOOK}${allPrices ? '&all=1' : ''}`).then(setData).catch((e) => setError(e.message)); }, [user?.book, allPrices]);
 
   if (error) return <div className="mx-auto max-w-5xl px-4 py-8"><Alert>{error}</Alert></div>;
   if (!data) return <div className="grid min-h-[50vh] place-items-center"><Spinner /></div>;
@@ -35,6 +36,12 @@ export default function Reports() {
         ))}
       </div>
 
+      {!isBacktest && (
+        <div className="mt-3 flex gap-1.5" role="radiogroup" aria-label="Price range">
+          <button type="button" role="radio" aria-checked={!allPrices} className={!allPrices ? 'chip-on' : 'chip-off'} onClick={() => setAllPrices(false)}>Official window (−200 to −500)</button>
+          <button type="button" role="radio" aria-checked={allPrices} className={allPrices ? 'chip-on' : 'chip-off'} onClick={() => setAllPrices(true)}>All prices</button>
+        </div>
+      )}
       <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${isBacktest ? 'border-warn/40 bg-warn/10 text-warn' : 'border-win/40 bg-win/10 text-win-text'}`}>
         {isBacktest
           ? 'Hypothetical. Backtests apply today’s method to past games after the fact. They were never published or bettable, and are not part of our record.'
@@ -72,9 +79,10 @@ function Summary({ s }) {
     ['ROI', signedPct(s.roi), null],
     ['Avg CLV', signedPct(s.avgClv), s.clvCount ? `${s.clvCount} with a closing price` : 'no closing prices yet'],
     ['Beat the close', pct(s.beatClose, 0), null],
+    ['Edge at close', signedPct(s.avgFairClv), s.fairClvCount ? `vs sharp closing price, ${s.fairClvCount} bets` : 'no closing data yet'],
   ];
   return (
-    <section className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+    <section className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
       {items.map(([label, value, sub]) => (
         <div key={label} className="card p-4">
           <div className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</div>

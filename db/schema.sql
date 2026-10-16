@@ -200,3 +200,9 @@ alter table bets add column if not exists model text not null default 'hitrate';
 alter table games add column if not exists odds_event_id text;
 alter table games add column if not exists book_checked_at timestamptz;
 create index if not exists bets_board_model_venue_idx on bets (board_id, model, venue);
+
+-- ── v7: research-grade tracking ─────────────────────────────────────────────────
+alter table bets add column if not exists closing_fair numeric(6, 4);   -- sharp fair prob at kickoff (CLV benchmark)
+alter table bets add column if not exists model_version text;           -- e.g. fair-v1
+alter table bets add column if not exists edge_first_seen timestamptz;  -- edge ≥ 1% first observed
+alter table bets add column if not exists edge_last_seen timestamptz;   -- edge ≥ 1% last observed

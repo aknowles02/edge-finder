@@ -143,8 +143,9 @@ router.get('/boards/:season/:week', requireEntitlement('board'), async (req, res
 /** Tracked-opportunity reporting. Real results and backtests are computed and returned separately. */
 router.get('/reports', requireEntitlement('reports'), async (req, res) => {
   const book = bookParam(req);
+  const allPrices = req.query.all === '1';
   const build = async (kind) => {
-    const rows = await trackedRows(kind, kind === 'live' ? { book } : { model: 'hitrate', book: null });
+    const rows = await trackedRows(kind, kind === 'live' ? { book, allPrices } : { model: 'hitrate', book: null });
     const byWeek = new Map();
     const byMarket = new Map();
     for (const r of rows) {
@@ -181,6 +182,7 @@ router.get('/reports', requireEntitlement('reports'), async (req, res) => {
     // Shown for transparency only: never part of the record above.
     volatile: summarizeTracked(volatileRows),
     book,
+    allPrices,
     // Picks made by the original hit-rate method before it was retired. Kept on the record, shown separately.
     retired: summarizeTracked(retiredRows),
     opportunities: recent.map((r) => ({

@@ -33,6 +33,7 @@ const DEFAULT_MARKETS = Object.keys(BOOK_MARKETS);
 /** How often each game's sportsbook prices are re-pulled. Tighter near kickoff, where lines move. */
 export function bookCadenceMs(kickoffMs, now = Date.now()) {
   const until = kickoffMs - now;
+  if (until <= 25 * 60_000) return 10 * 60_000; // final pull(s) right before kickoff = accurate closing price
   if (until <= 3 * HOUR) return HOUR;
   if (until <= 24 * HOUR) return 3 * HOUR;
   if (until <= 48 * HOUR) return 6 * HOUR;

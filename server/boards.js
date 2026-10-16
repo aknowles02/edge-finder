@@ -35,7 +35,7 @@ function toBet(r, model = false) {
     model: r.model, book: r.model === 'fair' ? r.venue : null,
     propKey: r.prop_key, player: r.player,
     qualifiedAt: r.qualified_at, qualifiedOdds: r.qualified_odds, qualifiedProb: r.qualified_prob, qualifiedEdge: r.qualified_edge,
-    closingOdds: r.closing_odds, result: r.result,
+    closingOdds: r.closing_odds, closingFair: r.closing_fair, result: r.result,
     // Per-season inputs are the model; only admins get them.
     ...(model ? { hit2025: r.hit_2025, n2025: r.n_2025, hit2026: r.hit_2026, n2026: r.n_2026 } : {}),
   };
@@ -78,7 +78,12 @@ export async function qualifyBets(db, boardId) {
        from boards bd
       where bd.id = b.board_id and bd.id = $1 and bd.status = 'published' and b.qualified_at is null
         and b.edge > case when b.model = 'fair' then $2::numeric else 0 end
-        and b.odds between bd.odds_min and bd.odds_max`,
+        -- Fair-model lines lock at ANY price (so we can study every range); the board window decides
+        -- what counts toward the official record. Legacy hit-rate picks keep the window rule.
+        and (b.model = 'fair' or b.odds between bd.odds_min and bd.odds_max)
+        -- Only lock a sportsbook line when its price was confirmed recently: a stale book price
+        -- against a fresh Kalshi move is a phantom edge, not one you could have bet.
+        and (b.model <> 'fair' or b.odds_updated_at > now() - interval '15 minutes')`,
     [boardId, MIN_QUALIFY_EDGE],
   );
   return rowCount;
@@ -88,17 +93,18 @@ export async function qualifyBets(db, boardId) {
  * Tracked opportunities for stats. Volatile props (TDs, INTs) are excluded unless `volatile` is
  * 'only' (for their own, separately labelled summary).
  */
-async function trackedRows(kind, { boardId, volatile = 'exclude', model = 'fair', book = DEFAULT_BOOK } = {}) {
+async function trackedRows(kind, { boardId, volatile = 'exclude', model = 'fair', book = DEFAULT_BOOK, allPrices = false } = {}) {
   const { rows } = await query(
-    `select b.qualified_odds, b.odds, b.result, b.closing_odds, b.market, b.prop_key, bd.id as board_id, bd.week, bd.season, bd.sport
+    `select b.qualified_odds, b.qualified_prob, b.odds, b.result, b.closing_odds, b.closing_fair, b.market, b.prop_key, bd.id as board_id, bd.week, bd.season, bd.sport
        from bets b join boards bd on bd.id = b.board_id
       where bd.status = 'published' and bd.kind = $1 and b.qualified_at is not null
         and ($2::bigint is null or bd.id = $2)
         and (case when $4 = 'only' then coalesce(b.prop_key, '') = any($3) else coalesce(b.prop_key, '') <> all($3) end)
-        and b.model = $5 and ($5 <> 'fair' or $6::text is null or b.venue = $6)`,
-    [kind, boardId ?? null, VOLATILE_PROPS, volatile, model, book],
+        and b.model = $5 and ($5 <> 'fair' or $6::text is null or b.venue = $6)
+        and ($7 or b.qualified_odds between bd.odds_min and bd.odds_max)`,
+    [kind, boardId ?? null, VOLATILE_PROPS, volatile, model, book, allPrices],
   );
-  return rows.map((r) => ({ ...r, qualifiedOdds: r.qualified_odds, closingOdds: r.closing_odds }));
+  return rows.map((r) => ({ ...r, qualifiedOdds: r.qualified_odds, closingOdds: r.closing_odds, qualifiedProb: r.qualified_prob, closingFair: r.closing_fair }));
 }
 
 /** Official (real, not backtest) record, graded at locked prices. Public on the landing page. */

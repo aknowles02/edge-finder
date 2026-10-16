@@ -16,7 +16,10 @@ import { qualifyBets } from './boards.js';
 import { refreshDraftKings } from './odds.js';
 import { alertAdminsOfErrors, alertBoardOnce } from './alerts.js';
 import { bookCadenceMs, fetchEventOdds, listEvents, scoreEventOdds, scoreKalshiAsBook } from './books.js';
-import { residualModels } from './fair.js';
+import { actionProb, fitGame, propFair, residualModels } from './fair.js';
+import { MIN_QUALIFY_EDGE } from '../shared/books.js';
+
+export const FAIR_MODEL_VERSION = 'fair-v1';
 import { matchEvent } from './odds.js';
 
 const SEASON = Number(process.env.SEASON || 2026);
@@ -197,6 +200,40 @@ export async function refreshKalshi({ ladders } = {}) {
 
 const RESERVE_CREDITS = Number(process.env.ODDS_API_MIN_CREDITS || 300);
 
+async function repriceStored(g, kalshi, models) {
+  const { rows: lines } = await query(
+    `select id, market, selection, line, odds, implied, prop_key, player, prop_side from bets
+      where game_id = $1 and model = 'fair' and line_status = 'live'`, [g.id]);
+  if (!lines.length) return 0;
+  const fit = fitGame(kalshi.filter((e) => e.kind !== 'prop'), g, models);
+  const ladders = new Map();
+  for (const e of kalshi) {
+    if (e.kind !== 'prop') continue;
+    const k = `${nameKey(e.player)}|${e.propKey}`;
+    if (!ladders.has(k)) ladders.set(k, []);
+    ladders.get(k).push(e);
+  }
+  const updates = [];
+  for (const b of lines) {
+    const line = Number(b.line);
+    const f = b.market === 'spread' ? fit.spread(b.selection, line)
+      : b.market === 'total' ? fit.total(b.selection, line)
+        : propFair(ladders.get(`${nameKey(b.player)}|${b.prop_key}`) ?? [], line, b.prop_side);
+    const p = actionProb(f);
+    if (p != null) updates.push({ id: b.id, fair: p, edge: p - Number(b.implied) });
+  }
+  if (!updates.length) return 0;
+  await query(
+    `update bets b set blended = x.fair, edge = x.edge,
+            edge_first_seen = case when x.edge >= $2 then coalesce(b.edge_first_seen, now()) else b.edge_first_seen end,
+            edge_last_seen = case when x.edge >= $2 then now() else b.edge_last_seen end
+       from jsonb_to_recordset($1::jsonb) as x(id bigint, fair numeric, edge numeric)
+      where b.id = x.id`,
+    [JSON.stringify(updates), MIN_QUALIFY_EDGE],
+  );
+  return updates.length;
+}
+
 /** Upsert scored lines for one game (any books) and log price moves. */
 async function upsertBookLines(gameRow, rows) {
   const keep = rows.filter((r) => r.edge > -0.03); // far-negative lines are noise; skip storing them
@@ -207,9 +244,9 @@ async function upsertBookLines(gameRow, rows) {
   );
   const prev = new Map(existing.map((e) => [e.external_ref, e]));
   await query(
-    `insert into bets (board_id, game_id, venue, model, external_ref, external_side, market, selection, line, odds,
+    `insert into bets (board_id, game_id, venue, model, model_version, external_ref, external_side, market, selection, line, odds,
                        blended, implied, edge, sample_size, line_status, odds_updated_at, prop_key, player, prop_side)
-     select $1, $2, x.book, 'fair', x.ref, 'book', x.market, x.selection, x.line, x.odds,
+     select $1, $2, x.book, 'fair', '${FAIR_MODEL_VERSION}', x.ref, 'book', x.market, x.selection, x.line, x.odds,
             x.fair, x.implied, x.edge, 0, 'live', now(), x."propKey", x.player, x."propSide"
        from jsonb_to_recordset($3::jsonb) as x(book text, market text, selection text, line numeric, odds int, fair numeric,
             implied numeric, edge numeric, ref text, "propKey" text, player text, "propSide" text)
@@ -256,6 +293,10 @@ export async function refreshBooks({ ladders, games, force = false } = {}) {
       out.kalshi += k.stored; out.moved += k.moved;
     }
 
+    // Free every run: re-price this game's stored sportsbook lines against the latest Kalshi fair value,
+    // so edges (and the closing fair price) track the sharp market between paid sportsbook pulls.
+    out.repriced = (out.repriced ?? 0) + await repriceStored(g, kalshi, models);
+
     if (!process.env.ODDS_API_KEY) continue;
     const kickoff = new Date(g.commence_time).getTime();
     const due = force || !g.book_checked_at || Date.now() - new Date(g.book_checked_at).getTime() >= bookCadenceMs(kickoff) - 60_000;
@@ -289,7 +330,8 @@ export async function refreshBooks({ ladders, games, force = false } = {}) {
 /** Lock closing prices at kickoff and qualify any newly positive-edge lines. */
 async function lockAndQualify() {
   await query(
-    `update bets b set closing_odds = b.odds, closing_at = now()
+    `update bets b set closing_odds = b.odds, closing_at = now(),
+            closing_fair = case when b.model = 'fair' then b.blended else null end
        from games g where g.id = b.game_id and g.commence_time <= now() and b.closing_odds is null and b.line_status = 'live'`,
   );
   const { rows } = await query(`select id from boards where kind = 'live' and status = 'published'`);

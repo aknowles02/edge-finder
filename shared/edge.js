@@ -271,10 +271,15 @@ export function closingLineValue(lockedOdds, closingOdds) {
 export function summarizeTracked(bets) {
   const base = summarize(bets.map((b) => ({ odds: b.qualifiedOdds ?? b.odds, result: b.result })));
   const clvs = bets.map((b) => closingLineValue(b.qualifiedOdds ?? b.odds, b.closingOdds)).filter((v) => v != null);
+  // Edge still left at kickoff per the sharp market: closing fair probability − implied prob of the locked price.
+  const fairClvs = bets.filter((b) => b.closingFair != null && (b.qualifiedOdds ?? b.odds) != null)
+    .map((b) => Number(b.closingFair) - impliedProbability(b.qualifiedOdds ?? b.odds));
   return {
     ...base,
     clvCount: clvs.length,
     avgClv: clvs.length ? clvs.reduce((s, v) => s + v, 0) / clvs.length : null,
     beatClose: clvs.length ? clvs.filter((v) => v > 0).length / clvs.length : null,
+    fairClvCount: fairClvs.length,
+    avgFairClv: fairClvs.length ? fairClvs.reduce((s, v) => s + v, 0) / fairClvs.length : null,
   };
 }
